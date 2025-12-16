@@ -1,55 +1,53 @@
 from pathlib import Path
 import argparse
+
 import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
+
 
 def read_header(header_path: Path):
     txt = header_path.read_text(encoding="utf-8").strip()
-    # header may be comma separated on one line
     cols = [c.strip() for c in txt.split(",") if c.strip()]
-    if len(cols) < 3:
-        # fallback
-        cols = ["time", "source", "resolved"]
-    # normalize to safe names
-    cols = cols[:3]
-    cols = ["time", "source", "resolved"]
-    return cols
+    if len(cols) >= 3:
+        return cols[:3]
+    return ["time", "source", "resolved"]
+
 
 def coerce_time(df: pd.DataFrame):
-    # Try numeric first
     df["time_raw"] = df["time"]
     df["time"] = pd.to_numeric(df["time"], errors="coerce")
 
     if df["time"].notna().mean() > 0.9:
-        # likely epoch seconds or a counter
-        # if values look like epoch seconds, convert
         t = df["time"].dropna()
-        if t.min() > 1e9 and t.max() < 3e10:
+        if len(t) and t.min() > 1e9 and t.max() < 3e10:
             df["time_dt"] = pd.to_datetime(df["time"], unit="s", errors="coerce")
         else:
             df["time_dt"] = pd.NaT
     else:
-        # try datetime parse
         df["time_dt"] = pd.to_datetime(df["time_raw"], errors="coerce")
 
     return df
+
 
 def save_plot(path: Path):
     plt.tight_layout()
     plt.savefig(path, dpi=200)
     plt.close()
 
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/dns.txt")
-    ap.add_argument("--header", default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/dns_header.txt")
-    ap.add_argument("--out", default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/dns_plots")
+    ap.add_argument("--data_dir", default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data")
+    ap.add_argument("--data", default="dns.txt")
+    ap.add_argument("--header", default="dns_header.txt")
+    ap.add_argument("--out", default="/home/kiwi-pandas/Documents/IDS_TopoGCL/plots")
     ap.add_argument("--topk", type=int, default=25)
     args = ap.parse_args()
 
-
-    data_path = Path(args.data)
-    header_path = Path(args.header)
+    data_dir = Path(args.data_dir)
+    data_path = data_dir / args.data
+    header_path = data_dir / args.header
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -60,8 +58,11 @@ def main():
         header=None,
         names=cols,
         sep=",",
-        engine="python"
+        engine="python",
     )
+
+    # Normalize expected column names
+    df.columns = ["time", "source", "resolved"]
 
     df["source"] = df["source"].astype(str).str.strip()
     df["resolved"] = df["resolved"].astype(str).str.strip()
@@ -72,83 +73,114 @@ def main():
     print("unique source:", df["source"].nunique())
     print("unique resolved:", df["resolved"].nunique())
 
-    # 1) Top sources
-    top_src = df["source"].value_counts().head(args.topk)
+    # 1) Time distribution
     plt.figure()
-    top_src.sort_values().plot(kind="barh")
-    plt.title(f"Top {args.topk} source computers")
-    plt.xlabel("count")
-    save_plot(outdir / "01_top_sources.png")
+    sns.histplot(df["time"].dropna(), bins=50)
+    plt.title("Distribution of time")
+    plt.xlabel("time")
+    plt.ylabel("count")
+    save_plot(outdir / "01_time_hist.png")
 
-    # 2) Top resolved
-    top_res = df["resolved"].value_counts().head(args.topk)
-    plt.figure()
-    top_res.sort_values().plot(kind="barh")
-    plt.title(f"Top {args.topk} resolved computers")
-    plt.xlabel("count")
-    save_plot(outdir / "02_top_resolved.png")
-
-    # 3) Top pairs
-    top_pairs = df.groupby(["source", "resolved"]).size().sort_values(ascending=False).head(args.topk)
-    plt.figure()
-    top_pairs.iloc[::-1].plot(kind="barh")
-    plt.title(f"Top {args.topk} source to resolved pairs")
-    plt.xlabel("count")
-    save_plot(outdir / "03_top_pairs.png")
-
-    # 4) Fan out per source: how many unique resolved per source
-    fanout = df.groupby("source")["resolved"].nunique().sort_values(ascending=False).head(args.topk)
-    plt.figure()
-    fanout.sort_values().plot(kind="barh")
-    plt.title(f"Top {args.topk} sources by unique resolved count")
-    plt.xlabel("unique resolved")
-    save_plot(outdir / "04_fanout_unique_resolved.png")
-
-    # 5) Fan in per resolved: how many unique sources query it
-    fanin = df.groupby("resolved")["source"].nunique().sort_values(ascending=False).head(args.topk)
-    plt.figure()
-    fanin.sort_values().plot(kind="barh")
-    plt.title(f"Top {args.topk} resolved by unique source count")
-    plt.xlabel("unique sources")
-    save_plot(outdir / "05_fanin_unique_sources.png")
-
-    # 6) Time series: events per bucket (only if we have a real datetime)
+    # 2) Events per time
     if df["time_dt"].notna().mean() > 0.5:
-        ts = df.set_index("time_dt").sort_index()
+        ts = df[["time_dt"]].dropna().copy()
+        ts = ts.sort_values("time_dt")
+        per_hour = ts.set_index("time_dt").resample("1H").size().reset_index(name="count")
 
-        for rule, name in [("1min", "minute"), ("1H", "hour")]:
-            counts = ts["source"].resample(rule).size()
+        plt.figure()
+        sns.lineplot(data=per_hour, x="time_dt", y="count")
+        plt.title("DNS events per hour")
+        plt.xlabel("time")
+        plt.ylabel("events")
+        save_plot(outdir / "02_events_per_hour.png")
+    else:
+        tmp = df[df["time"].notna()].copy()
+        if len(tmp):
+            counts_by_t = tmp.groupby("time").size().reset_index(name="count").sort_values("time")
+
             plt.figure()
-            counts.plot()
-            plt.title(f"DNS events per {name}")
+            sns.lineplot(data=counts_by_t, x="time", y="count")
+            plt.title("DNS events per time")
             plt.xlabel("time")
             plt.ylabel("events")
-            save_plot(outdir / f"06_events_per_{name}.png")
+            save_plot(outdir / "02_events_per_time.png")
 
-        # 7) New resolved over time (first seen)
-        first_seen = ts.reset_index().groupby("resolved")["time_dt"].min().sort_values()
-        new_per_hour = first_seen.dt.floor("1H").value_counts().sort_index()
-        plt.figure()
-        new_per_hour.plot()
-        plt.title("New resolved computers first seen per hour")
-        plt.xlabel("time")
-        plt.ylabel("new resolved")
-        save_plot(outdir / "07_new_resolved_per_hour.png")
-    else:
-        # If time is numeric, still do a simple volume over time by binning
-        t = pd.to_numeric(df["time"], errors="coerce").dropna()
-        if len(t) > 0:
-            df2 = df[df["time"].notna()].copy()
-            df2["time_bin"] = pd.cut(df2["time"], bins=50)
-            counts = df2.groupby("time_bin").size()
-            plt.figure()
-            counts.plot(kind="bar")
-            plt.title("DNS events over binned time")
-            plt.xlabel("time bins")
-            plt.ylabel("events")
-            save_plot(outdir / "06_events_binned_time.png")
+    # 3) Top sources
+    top_src = df["source"].value_counts().head(args.topk).reset_index()
+    top_src.columns = ["source", "count"]
 
-    print(f"Saved plots in: {outdir.resolve()}")
+    plt.figure()
+    sns.barplot(data=top_src.sort_values("count"), x="count", y="source")
+    plt.title(f"Top {args.topk} source computers")
+    plt.xlabel("count")
+    plt.ylabel("source")
+    save_plot(outdir / "03_top_sources.png")
+
+    # 4) Top resolved
+    top_res = df["resolved"].value_counts().head(args.topk).reset_index()
+    top_res.columns = ["resolved", "count"]
+
+    plt.figure()
+    sns.barplot(data=top_res.sort_values("count"), x="count", y="resolved")
+    plt.title(f"Top {args.topk} resolved computers")
+    plt.xlabel("count")
+    plt.ylabel("resolved")
+    save_plot(outdir / "04_top_resolved.png")
+
+    # 5) Top pairs
+    pairs = (
+        df.groupby(["source", "resolved"])
+          .size()
+          .reset_index(name="count")
+          .sort_values("count", ascending=False)
+          .head(args.topk)
+    )
+    pairs["pair"] = pairs["source"] + " to " + pairs["resolved"]
+
+    plt.figure()
+    sns.barplot(data=pairs.sort_values("count"), x="count", y="pair")
+    plt.title(f"Top {args.topk} source to resolved pairs")
+    plt.xlabel("count")
+    plt.ylabel("pair")
+    save_plot(outdir / "05_top_pairs.png")
+
+    # 6) Fan out per source
+    fanout = (
+        df.groupby("source")["resolved"]
+          .nunique()
+          .sort_values(ascending=False)
+          .head(args.topk)
+          .reset_index()
+    )
+    fanout.columns = ["source", "unique_resolved"]
+
+    plt.figure()
+    sns.barplot(data=fanout.sort_values("unique_resolved"), x="unique_resolved", y="source")
+    plt.title(f"Top {args.topk} sources by unique resolved")
+    plt.xlabel("unique resolved")
+    plt.ylabel("source")
+    save_plot(outdir / "06_fanout_unique_resolved.png")
+
+    # 7) Fan in per resolved
+    fanin = (
+        df.groupby("resolved")["source"]
+          .nunique()
+          .sort_values(ascending=False)
+          .head(args.topk)
+          .reset_index()
+    )
+    fanin.columns = ["resolved", "unique_sources"]
+
+    plt.figure()
+    sns.barplot(data=fanin.sort_values("unique_sources"), x="unique_sources", y="resolved")
+    plt.title(f"Top {args.topk} resolved by unique sources")
+    plt.xlabel("unique sources")
+    plt.ylabel("resolved")
+    save_plot(outdir / "07_fanin_unique_sources.png")
+
+    print(f"Saved plots in: {outdir}")
+
 
 if __name__ == "__main__":
     main()
+
