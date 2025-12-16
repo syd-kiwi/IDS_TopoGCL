@@ -42,7 +42,7 @@ def main():
     ap.add_argument("--data", default="dns.txt")
     ap.add_argument("--header", default="dns_header.txt")
     ap.add_argument("--out", default="/home/kiwi-pandas/Documents/IDS_TopoGCL/plots")
-    ap.add_argument("--topk", type=int, default=25)
+    ap.add_argument("--topk", type=int, default=10)
     args = ap.parse_args()
 
     data_dir = Path(args.data_dir)
