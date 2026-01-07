@@ -1,0 +1,17 @@
+{
+  "benign_path": "/home/vt/sydneyjohns/IDS_TopoGCL/data/interim/baseline_inputs/benign_merged.csv",
+  "window_size": 300,
+  "max_windows": 2000,
+  "graphs_kept": 2000,
+  "train_graphs": 1400,
+  "test_graphs": 600,
+  "threshold_q": 0.99,
+  "threshold": 39.608455657958984,
+  "edge_drop": 0.2,
+  "feat_jitter": 0.05,
+  "epochs": 5,
+  "batch_size": 128,
+  "lr": 0.001,
+  "seed": 7,
+  "device": "cuda"
+}

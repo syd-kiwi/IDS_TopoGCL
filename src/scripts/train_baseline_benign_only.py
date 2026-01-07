@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import csv
-import math
-import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import torch
@@ -42,7 +41,7 @@ class Event:
     byt: int
 
 
-def parse_event_line(line: str) -> Event | None:
+def parse_event_line(line: str) -> Optional[Event]:
     parts = line.strip().split(",")
     if len(parts) < 9:
         return None
@@ -53,7 +52,11 @@ def parse_event_line(line: str) -> Event | None:
         return None
 
 
-def load_windows(path: Path, window_size: int, max_windows: int | None) -> Tuple[List[int], List[List[Event]]]:
+def load_windows(
+    path: Path,
+    window_size: int,
+    max_windows: Optional[int],
+) -> Tuple[List[int], List[List[Event]]]:
     """
     Returns:
       window_starts: list of window start times (int seconds)
@@ -63,7 +66,7 @@ def load_windows(path: Path, window_size: int, max_windows: int | None) -> Tuple
     windows: List[List[Event]] = []
     window_starts: List[int] = []
 
-    current_bucket = None
+    current_bucket: Optional[int] = None
     current_events: List[Event] = []
 
     with path.open("r", encoding="utf-8", errors="ignore") as f:
@@ -80,6 +83,7 @@ def load_windows(path: Path, window_size: int, max_windows: int | None) -> Tuple
             if bucket != current_bucket:
                 window_starts.append(current_bucket)
                 windows.append(current_events)
+
                 current_bucket = bucket
                 current_events = []
 
@@ -99,7 +103,7 @@ def load_windows(path: Path, window_size: int, max_windows: int | None) -> Tuple
 # Graph building
 # -----------------------------
 
-def build_graph_from_events(events: List[Event]) -> Data | None:
+def build_graph_from_events(events: List[Event]) -> Optional[Data]:
     """
     Nodes are computers.
     Edges are src -> dst.
@@ -108,30 +112,25 @@ def build_graph_from_events(events: List[Event]) -> Data | None:
     if len(events) == 0:
         return None
 
-    # Collect node ids
-    node_ids = {}
+    node_ids: Dict[int, int] = {}
+
     def nid(x: int) -> int:
         if x not in node_ids:
             node_ids[x] = len(node_ids)
         return node_ids[x]
 
-    # Edge lists and aggregates
-    src_list = []
-    dst_list = []
-
-    out_deg = None
-    in_deg = None
-    out_bytes = None
-    in_bytes = None
-    out_pkts = None
-    in_pkts = None
-
-    # Pre size
+    # Collect nodes
     for ev in events:
         nid(ev.src)
         nid(ev.dst)
 
     n = len(node_ids)
+    if n == 0:
+        return None
+
+    src_list: List[int] = []
+    dst_list: List[int] = []
+
     out_deg = np.zeros(n, dtype=np.int64)
     in_deg = np.zeros(n, dtype=np.int64)
     out_bytes = np.zeros(n, dtype=np.int64)
@@ -142,17 +141,20 @@ def build_graph_from_events(events: List[Event]) -> Data | None:
     for ev in events:
         s = nid(ev.src)
         d = nid(ev.dst)
+
         src_list.append(s)
         dst_list.append(d)
 
         out_deg[s] += 1
         in_deg[d] += 1
 
-        out_bytes[s] += max(0, ev.byt)
-        in_bytes[d] += max(0, ev.byt)
+        byt = ev.byt if ev.byt > 0 else 0
+        pkt = ev.pkt if ev.pkt > 0 else 0
 
-        out_pkts[s] += max(0, ev.pkt)
-        in_pkts[d] += max(0, ev.pkt)
+        out_bytes[s] += byt
+        in_bytes[d] += byt
+        out_pkts[s] += pkt
+        in_pkts[d] += pkt
 
     if len(src_list) == 0:
         return None
@@ -162,13 +164,13 @@ def build_graph_from_events(events: List[Event]) -> Data | None:
     # Features: [out_deg, in_deg, out_bytes, in_bytes, out_pkts, in_pkts]
     x = np.stack([out_deg, in_deg, out_bytes, in_bytes, out_pkts, in_pkts], axis=1).astype(np.float32)
 
-    # Log scale heavy tails
+    # Log scale heavy tails for bytes/pkts
     x[:, 2:] = np.log1p(x[:, 2:])
 
     x = torch.tensor(x, dtype=torch.float)
 
     data = Data(x=x, edge_index=edge_index)
-    data.num_nodes = x.shape[0]
+    data.num_nodes = int(x.shape[0])
     return data
 
 
@@ -180,7 +182,7 @@ def drop_edges(data: Data, drop_p: float, rng: np.random.RandomState) -> Data:
     if drop_p <= 0.0:
         return data
     ei = data.edge_index
-    m = ei.size(1)
+    m = int(ei.size(1))
     if m <= 1:
         return data
     keep = rng.rand(m) >= drop_p
@@ -193,10 +195,10 @@ def drop_edges(data: Data, drop_p: float, rng: np.random.RandomState) -> Data:
 def jitter_features(data: Data, sigma: float, rng: np.random.RandomState) -> Data:
     if sigma <= 0.0:
         return data
-    noise = rng.normal(0.0, sigma, size=data.x.shape).astype(np.float32)
-    x2 = data.x + torch.tensor(noise, dtype=torch.float)
+    noise_np = rng.normal(0.0, sigma, size=tuple(data.x.shape)).astype(np.float32)
+    noise = torch.tensor(noise_np, dtype=torch.float, device=data.x.device)
+    x2 = data.x + noise
     return Data(x=x2, edge_index=data.edge_index, num_nodes=data.num_nodes)
-
 
 # -----------------------------
 # Model
@@ -231,9 +233,9 @@ class ProjectionHead(nn.Module):
 
 def nt_xent(z1: torch.Tensor, z2: torch.Tensor, temperature: float) -> torch.Tensor:
     """
-    Standard SimCLR style NT Xent loss.
+    SimCLR style NT-Xent loss over a batch of graph embeddings.
     """
-    b = z1.size(0)
+    b = int(z1.size(0))
     z = torch.cat([z1, z2], dim=0)  # 2b x d
     sim = torch.mm(z, z.t()) / temperature
 
@@ -241,17 +243,12 @@ def nt_xent(z1: torch.Tensor, z2: torch.Tensor, temperature: float) -> torch.Ten
     mask = torch.eye(2 * b, device=z.device, dtype=torch.bool)
     sim = sim.masked_fill(mask, -1e9)
 
-    # positives are (i, i+b) and (i+b, i)
     targets = torch.arange(2 * b, device=z.device)
     pos = (targets + b) % (2 * b)
 
     loss = F.cross_entropy(sim, pos)
     return loss
 
-
-# -----------------------------
-# Train and score
-# -----------------------------
 
 @torch.no_grad()
 def embed_all(encoder: nn.Module, loader: DataLoader, device: torch.device) -> torch.Tensor:
@@ -300,8 +297,9 @@ def main():
     print(f"[+] loading windows from {benign_path}")
     window_starts, windows = load_windows(benign_path, args.window_size, args.max_windows)
 
-    graphs = []
-    kept_starts = []
+    graphs: List[Data] = []
+    kept_starts: List[int] = []
+
     for ws, evs in zip(window_starts, windows):
         g = build_graph_from_events(evs)
         if g is None:
@@ -319,14 +317,11 @@ def main():
     n = len(graphs)
     n_train = max(1, int(args.train_frac * n))
     train_graphs = graphs[:n_train]
-    test_graphs = graphs[n_train:]
-    train_starts = kept_starts[:n_train]
-    test_starts = kept_starts[n_train:]
 
     train_loader = DataLoader(train_graphs, batch_size=args.batch_size, shuffle=True)
     all_loader = DataLoader(graphs, batch_size=args.batch_size, shuffle=False)
 
-    in_dim = train_graphs[0].x.size(1)
+    in_dim = int(train_graphs[0].x.size(1))
     encoder = GCNEncoder(in_dim, args.hidden, args.emb_dim).to(device)
     projector = ProjectionHead(args.emb_dim, args.proj_dim).to(device)
 
@@ -337,21 +332,16 @@ def main():
         encoder.train()
         projector.train()
 
-        total = 0.0
+        total_loss = 0.0
         steps = 0
 
         for batch in train_loader:
             batch = batch.to(device)
 
-            # Build two augmented views per graph in the batch
-            # torch_geometric batches are combined, so we do augmentation per Data object before batching.
-            # DataLoader gives a Batch already, so we approximate by augmenting the whole batch graph.
-            # This is a baseline and is fine for now.
-
-            # View 1
+            # Baseline augmentation on the batched graph
             v1 = drop_edges(batch, args.edge_drop, rng)
             v1 = jitter_features(v1, args.feat_jitter, rng)
-            # View 2
+
             v2 = drop_edges(batch, args.edge_drop, rng)
             v2 = jitter_features(v2, args.feat_jitter, rng)
 
@@ -367,12 +357,11 @@ def main():
             loss.backward()
             opt.step()
 
-            total += float(loss.item())
+            total_loss += float(loss.item())
             steps += 1
 
-        print(f"[+] epoch {ep}/{args.epochs} loss {total / max(1, steps):.4f}")
+        print(f"[+] epoch {ep}/{args.epochs} loss {total_loss / max(1, steps):.4f}")
 
-    # Embed all windows
     print("[+] embedding all windows")
     Z_all = embed_all(encoder, all_loader, device)  # n x emb_dim
 
@@ -380,14 +369,11 @@ def main():
     Z_train = Z_all[:n_train]
     center = Z_train.mean(dim=0, keepdim=True)
 
-    # Scores are L2 distance to center
     scores = torch.norm(Z_all - center, p=2, dim=1).numpy()
 
-    # Threshold from train scores
     thr = float(np.quantile(scores[:n_train], args.threshold_q))
     flags = (scores > thr).astype(np.int32)
 
-    # Save CSV
     scores_csv = out_dir / "scores.csv"
     with scores_csv.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -396,7 +382,6 @@ def main():
             split = "train" if i < n_train else "test"
             w.writerow([ws, float(scores[i]), int(flags[i]), split])
 
-    # Top anomalies
     topk = min(100, len(scores))
     idx = np.argsort(-scores)[:topk]
     top_csv = out_dir / "top_anomalies.csv"
@@ -430,7 +415,6 @@ def main():
     plt.savefig(out_dir / "score_hist.png", dpi=200)
     plt.close()
 
-    # Save run meta
     meta = {
         "benign_path": str(benign_path),
         "window_size": args.window_size,
@@ -453,9 +437,7 @@ def main():
     print(f"[+] wrote: {scores_csv}")
     print(f"[+] wrote: {top_csv}")
     print(f"[+] threshold: {thr:.6f}")
-    print("[✔] Proof succeeded!")
 
 
 if __name__ == "__main__":
-    import json
     main()
