@@ -234,12 +234,12 @@ def main() -> None:
     parser.add_argument(
         "--auth_path",
         type=str,
-        default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/OPTC/auth_optc.txt",
+        default="/home/sydneyjohns/IDS_TopoGCL/data/OPTC/auth_optc.txt",
     )
     parser.add_argument(
         "--red_path",
         type=str,
-        default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/OPTC/redteam_optc.txt",
+        default="/home/sydneyjohns/IDS_TopoGCL/data/OPTC/redteam_optc.txt",
     )
     parser.add_argument("--window_size", type=int, default=300)
     parser.add_argument("--hidden_dim", type=int, default=32)
