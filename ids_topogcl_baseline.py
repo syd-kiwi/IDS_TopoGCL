@@ -258,8 +258,8 @@ def roc_auc(scores: List[float], labels: List[int]) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="TopoGCL-inspired IDS baseline (single-file)")
-    parser.add_argument("--auth_path", type=str, default="/Users/chaoyuzhang/Desktop/gcl_IDS/prototype/data/optc/auth_optc.txt")
-    parser.add_argument("--red_path", type=str, default="/Users/chaoyuzhang/Desktop/gcl_IDS/prototype/data/optc/redteam_optc.txt")
+    parser.add_argument("--auth_path", type=str, default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/OPTC/auth_optc.txt")
+    parser.add_argument("--red_path", type=str, default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/OPTC/redteam_optc.txt")
     parser.add_argument("--window_size", type=int, default=300)
     parser.add_argument("--hidden_dim", type=int, default=64)
     parser.add_argument("--emb_dim", type=int, default=32)
