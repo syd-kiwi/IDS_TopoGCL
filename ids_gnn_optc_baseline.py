@@ -234,12 +234,12 @@ def main() -> None:
     parser.add_argument(
         "--auth_path",
         type=str,
-        default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/OPTC/auth_optc.txt",
+        default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/LANL/AUTH/auth_reformat.txt",
     )
     parser.add_argument(
         "--red_path",
         type=str,
-        default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/OPTC/redteam_optc.txt",
+        default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/LANL/REDTEAM/redteam_reformat.txt",
     )
     parser.add_argument("--window_size", type=int, default=300)
     parser.add_argument("--hidden_dim", type=int, default=32)
@@ -249,7 +249,7 @@ def main() -> None:
     parser.add_argument("--benign_limit", type=int, default=2000)
     parser.add_argument("--mal_limit", type=int, default=2000)
     parser.add_argument("--threshold_q", type=float, default=0.99)
-    parser.add_argument("--out_json", type=str, default="ids_results.json")
+    parser.add_argument("--out_json", type=str, default="ids_lanl_results.json")
     args = parser.parse_args()
 
     assert os.path.exists(args.auth_path), "auth file not found"

@@ -1,0 +1,27 @@
+{
+  "num_benign_windows": 500,
+  "num_mal_windows": 300,
+  "threshold_q": 0.99,
+  "threshold": 0.02,
+  "metrics": {
+    "accuracy": 0.99,
+    "precision": 0.98,
+    "recall": 1.0,
+    "f1": 0.99,
+    "tpr": 1.0,
+    "fpr": 0.01,
+    "auroc": 1.0
+  },
+  "training": {
+    "epochs": 5,
+    "lr": 0.001,
+    "hidden_dim": 64,
+    "emb_dim": 32,
+    "edge_drop": 0.2,
+    "feat_mask": 0.2,
+    "tau": 0.2,
+    "batch_size": 64,
+    "window_size": 30,
+    "max_nodes": 50000
+  }
+}
