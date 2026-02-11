@@ -289,6 +289,19 @@ def compute_auroc(y_true: List[int], scores: List[float]) -> float:
     return u / (n_pos * n_neg)
 
 
+def split_train_test_benign(
+    graphs: List[GraphWindow],
+    train_ratio: float,
+) -> Tuple[List[GraphWindow], List[GraphWindow]]:
+    if not graphs:
+        return [], []
+
+    ordered = sorted(graphs, key=lambda g: g.window_start)
+    split_idx = int(len(ordered) * train_ratio)
+    split_idx = max(1, min(split_idx, len(ordered) - 1)) if len(ordered) > 1 else 1
+    return ordered[:split_idx], ordered[split_idx:]
+
+
 # -----------------------------
 # Main
 # -----------------------------
@@ -304,6 +317,7 @@ def main():
     ap.add_argument("--benign_limit", type=int, default=500)
     ap.add_argument("--mal_limit", type=int, default=500)
     ap.add_argument("--max_nodes", type=int, default=8000)
+    ap.add_argument("--train_ratio", type=float, default=0.8, help="fraction of benign windows used for training")
     ap.add_argument("--threshold_q", type=float, default=0.99)
     ap.add_argument("--out_json", type=str, default="lanl_ids_results.json")
     args = ap.parse_args()
@@ -334,11 +348,18 @@ def main():
     model = GraphAutoModel(in_dim=15, hidden_dim=args.hidden_dim, emb_dim=args.emb_dim).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
 
+    benign_train, benign_test = split_train_test_benign(d_benign, args.train_ratio)
+    if len(benign_test) == 0:
+        print("[WARN] Not enough benign windows to create a holdout test split; metrics will use training windows.")
+        benign_test = benign_train
+
+    print(f"[OK] benign split train={len(benign_train)} test={len(benign_test)}")
+
     # Train on benign only
     model.train()
     for ep in range(args.epochs):
         total = 0.0
-        for gw in d_benign:
+        for gw in benign_train:
             gwd = GraphWindow(
                 x=gw.x.to(device),
                 a_hat=gw.a_hat.to(device),
@@ -353,13 +374,19 @@ def main():
             opt.step()
             total += float(loss.item())
 
-        print(f"[OK] epoch {ep+1}/{args.epochs} benign recon mse {total / max(1, len(d_benign)):.6f}")
+        print(f"[OK] epoch {ep+1}/{args.epochs} benign recon mse {total / max(1, len(benign_train)):.6f}")
 
     # Score graphs
     model.eval()
     with torch.no_grad():
         benign_scores: List[float] = []
-        for gw in d_benign:
+        train_scores: List[float] = []
+        for gw in benign_train:
+            gwd = GraphWindow(gw.x.to(device), gw.a_hat.to(device), gw.num_nodes, gw.window_start)
+            pred, target = model(gwd)
+            train_scores.append(mse(pred.cpu(), target.cpu()))
+
+        for gw in benign_test:
             gwd = GraphWindow(gw.x.to(device), gw.a_hat.to(device), gw.num_nodes, gw.window_start)
             pred, target = model(gwd)
             benign_scores.append(mse(pred.cpu(), target.cpu()))
@@ -371,12 +398,12 @@ def main():
             mal_scores.append(mse(pred.cpu(), target.cpu()))
 
     # Threshold from benign quantile
-    bs = torch.tensor(benign_scores)
+    bs = torch.tensor(train_scores)
     thr = float(torch.quantile(bs, args.threshold_q).item())
     print(f"[OK] threshold quantile {args.threshold_q} value {thr:.6f}")
 
     # Metrics on combined set
-    y_true = ([0] * len(d_benign)) + ([1] * len(d_mal))
+    y_true = ([0] * len(benign_test)) + ([1] * len(d_mal))
     scores_all = benign_scores + mal_scores
 
     acc, precision, recall, f1, tpr, fpr = compute_basic_metrics(y_true, scores_all, thr)
