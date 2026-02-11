@@ -437,6 +437,19 @@ def roc_auc(scores: List[float], labels: List[int]) -> float:
     return float(u / (n_pos * n_neg))
 
 
+def split_train_test_benign(
+    graphs: List[GraphWindow],
+    train_ratio: float,
+) -> Tuple[List[GraphWindow], List[GraphWindow]]:
+    if not graphs:
+        return [], []
+
+    ordered = sorted(graphs, key=lambda g: g.window_start)
+    split_idx = int(len(ordered) * train_ratio)
+    split_idx = max(1, min(split_idx, len(ordered) - 1)) if len(ordered) > 1 else 1
+    return ordered[:split_idx], ordered[split_idx:]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="TopoGCL style IDS baseline for LANL with sparse graphs")
     parser.add_argument("--auth_path", type=str, required=True, help="converted benign csv (9 ints)")
@@ -448,6 +461,7 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--benign_limit", type=int, default=2000)
     parser.add_argument("--mal_limit", type=int, default=2000)
+    parser.add_argument("--train_ratio", type=float, default=0.8, help="fraction of benign windows used for training")
     parser.add_argument("--threshold_q", type=float, default=0.99)
     parser.add_argument("--edge_drop", type=float, default=0.2)
     parser.add_argument("--feat_mask", type=float, default=0.2)
@@ -483,9 +497,16 @@ def main() -> None:
     in_dim = benign_graphs[0].x.shape[1]
     model = GCN(in_dim=in_dim, hidden_dim=args.hidden_dim, out_dim=args.emb_dim)
 
+    benign_train, benign_test = split_train_test_benign(benign_graphs, args.train_ratio)
+    if len(benign_test) == 0:
+        print("[WARN] Not enough benign windows to create a holdout test split; metrics will use training windows.", flush=True)
+        benign_test = benign_train
+
+    print(f"[OK] benign split train={len(benign_train)} test={len(benign_test)}", flush=True)
+
     train_contrastive(
         model=model,
-        graphs=benign_graphs,
+        graphs=benign_train,
         epochs=args.epochs,
         lr=args.lr,
         edge_drop=args.edge_drop,
@@ -496,22 +517,23 @@ def main() -> None:
         device=device,
     )
 
-    center = compute_center(model, benign_graphs, device=device)
+    center = compute_center(model, benign_train, device=device)
 
-    d_benign = distances(model, benign_graphs, center, device=device, tag="score benign")
+    d_benign_train = distances(model, benign_train, center, device=device, tag="score benign train")
+    d_benign_test = distances(model, benign_test, center, device=device, tag="score benign test")
     d_mal = distances(model, mal_graphs, center, device=device, tag="score malicious")
 
-    thr = float(torch.quantile(torch.tensor(d_benign), args.threshold_q).item())
+    thr = float(torch.quantile(torch.tensor(d_benign_train), args.threshold_q).item())
 
-    y_true = [0] * len(d_benign) + [1] * len(d_mal)
-    y_score = d_benign + d_mal
+    y_true = [0] * len(d_benign_test) + [1] * len(d_mal)
+    y_score = d_benign_test + d_mal
     y_pred = [1 if s > thr else 0 for s in y_score]
 
     # Confusion using same convention as your baseline
-    fp = sum(1 for yp in y_pred[: len(d_benign)] if yp == 1)
-    tn = sum(1 for yp in y_pred[: len(d_benign)] if yp == 0)
-    tp = sum(1 for yp in y_pred[len(d_benign) :] if yp == 1)
-    fn = sum(1 for yp in y_pred[len(d_benign) :] if yp == 0)
+    fp = sum(1 for yp in y_pred[: len(d_benign_test)] if yp == 1)
+    tn = sum(1 for yp in y_pred[: len(d_benign_test)] if yp == 0)
+    tp = sum(1 for yp in y_pred[len(d_benign_test) :] if yp == 1)
+    fn = sum(1 for yp in y_pred[len(d_benign_test) :] if yp == 0)
 
     tpr = tp / (tp + fn) if (tp + fn) else 0.0
     fpr = fp / (fp + tn) if (fp + tn) else 0.0
@@ -522,7 +544,7 @@ def main() -> None:
     auc = roc_auc(y_score, y_true)
 
     results = {
-        "num_benign_windows": len(d_benign),
+        "num_benign_windows": len(benign_graphs),
         "num_mal_windows": len(d_mal),
         "threshold_q": round(args.threshold_q, 2),
         "threshold": round(thr, 2),
