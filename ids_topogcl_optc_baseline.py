@@ -260,9 +260,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="TopoGCL-inspired IDS baseline (single-file)")
     parser.add_argument("--auth_path", type=str, default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/OPTC/auth_optc.txt")
     parser.add_argument("--red_path", type=str, default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/OPTC/redteam_optc.txt")
-    parser.add_argument("--window_size", type=int, default=300)
-    parser.add_argument("--hidden_dim", type=int, default=64)
-    parser.add_argument("--emb_dim", type=int, default=32)
+    parser.add_argument("--window_size", type=int, default=1)
+    parser.add_argument("--hidden_dim", type=int, default=32)
+    parser.add_argument("--emb_dim", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--benign_limit", type=int, default=2000)
@@ -272,7 +272,7 @@ def main() -> None:
     parser.add_argument("--feat_mask", type=float, default=0.2)
     parser.add_argument("--tau", type=float, default=0.2)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--out_json", type=str, default="ids_topogcl_results.json")
+    parser.add_argument("--out_json", type=str, default="optc_topogcl_results.json")
     args = parser.parse_args()
 
     assert os.path.exists(args.auth_path), "auth file not found"

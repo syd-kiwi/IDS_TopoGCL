@@ -241,7 +241,7 @@ def main() -> None:
         type=str,
         default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/LANL/REDTEAM/redteam_reformat.txt",
     )
-    parser.add_argument("--window_size", type=int, default=300)
+    parser.add_argument("--window_size", type=int, default=1)
     parser.add_argument("--hidden_dim", type=int, default=32)
     parser.add_argument("--emb_dim", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=5)
@@ -249,7 +249,7 @@ def main() -> None:
     parser.add_argument("--benign_limit", type=int, default=2000)
     parser.add_argument("--mal_limit", type=int, default=2000)
     parser.add_argument("--threshold_q", type=float, default=0.99)
-    parser.add_argument("--out_json", type=str, default="ids_lanl_results.json")
+    parser.add_argument("--out_json", type=str, default="optc_gnn_results.json")
     args = parser.parse_args()
 
     assert os.path.exists(args.auth_path), "auth file not found"
