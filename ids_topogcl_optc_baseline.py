@@ -60,7 +60,9 @@ def _is_git_lfs_pointer(file_path: str) -> bool:
 
 def build_graph(rows: List[Tuple[int, int, int, int, int, int, int, int, int]]) -> GraphWindow:
     if not rows:
-        x = torch.ones(1, 3)
+        # Keep feature dimensionality consistent with non-empty windows:
+        # [deg_in, deg_out, deg, out_mean(6), in_mean(6)] => 15 dims.
+        x = torch.zeros(1, 15)
         return GraphWindow(x=x, a_hat=torch.eye(1), num_nodes=1)
     node_ids: Dict[int, int] = {}
     for _, s, _, _, d, *_ in rows:
@@ -110,6 +112,17 @@ class GCN(torch.nn.Module):
         h = torch.relu(a_hat @ self.w1(x))
         h = a_hat @ self.w2(h)
         return h.mean(dim=0)
+
+
+def _coerce_feature_dim(g: GraphWindow, target_dim: int = 15) -> GraphWindow:
+    if g.x.shape[1] == target_dim:
+        return g
+    if g.x.shape[1] < target_dim:
+        pad = torch.zeros((g.x.shape[0], target_dim - g.x.shape[1]), dtype=g.x.dtype, device=g.x.device)
+        x = torch.cat([g.x, pad], dim=1)
+    else:
+        x = g.x[:, :target_dim]
+    return GraphWindow(x=x, a_hat=g.a_hat, num_nodes=g.num_nodes)
 
 
 def iter_graphs(file_path: str, limit: Optional[int], window_size: int) -> Iterable[GraphWindow]:
