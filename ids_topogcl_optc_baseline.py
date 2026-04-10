@@ -7,6 +7,8 @@ from typing import Dict, Generator, Iterable, List, Tuple, Optional
 
 import torch
 
+from src.data_corruptions import drop_edges, drop_raw_events, mask_node_features
+
 
 @dataclass
 class GraphWindow:
@@ -108,6 +110,53 @@ def iter_graphs(file_path: str, limit: Optional[int], window_size: int) -> Itera
         count += 1
         if limit is not None and count >= limit:
             break
+
+
+def apply_graph_corruption(
+    g: GraphWindow,
+    corruption_type: str,
+    corruption_rate: float,
+    node_mask_mode: str,
+    rng: torch.Generator,
+) -> Tuple[GraphWindow, Dict[str, float]]:
+    if corruption_type == "none" or corruption_rate <= 0.0:
+        return g, {"edges_before": float(g.a_hat.numel()), "edges_after": float(g.a_hat.numel()), "masked_fraction": 0.0}
+
+    x = g.x.clone()
+    a_hat = g.a_hat.clone()
+    stats: Dict[str, float] = {"edges_before": float((a_hat > 0).sum().item()), "edges_after": float((a_hat > 0).sum().item()), "masked_fraction": 0.0}
+
+    if corruption_type == "node_features":
+        x, mask_stats = mask_node_features(x, rate=corruption_rate, mode=node_mask_mode, fill_value=0.0, rng=rng)
+        stats["masked_fraction"] = mask_stats["masked_fraction"]
+    elif corruption_type == "edges":
+        n = g.num_nodes
+        if n > 1:
+            edge_set = []
+            for u in range(n):
+                for v in range(u + 1, n):
+                    if a_hat[u, v] > 0:
+                        edge_set.append((u, v))
+            if edge_set:
+                edge_index = torch.tensor(edge_set, dtype=torch.long).t().contiguous()
+                edge_index, _, edge_stats = drop_edges(edge_index, rate=corruption_rate, rng=rng)
+                a = torch.zeros((n, n))
+                if edge_index.numel() > 0:
+                    src, dst = edge_index
+                    a[src, dst] = 1.0
+                    a[dst, src] = 1.0
+                a = a + torch.eye(n)
+                d = a.sum(dim=1)
+                d_inv_sqrt = torch.pow(d.clamp_min(1.0), -0.5)
+                a_hat = d_inv_sqrt.unsqueeze(1) * a * d_inv_sqrt.unsqueeze(0)
+                stats["edges_before"] = float(edge_stats["edges_before"])
+                stats["edges_after"] = float(edge_stats["edges_after"])
+    else:
+        raise ValueError(f"Unsupported corruption_type: {corruption_type}")
+
+    assert x.dim() == 2, "node feature tensor must be 2D"
+    assert a_hat.shape[0] == a_hat.shape[1] == g.num_nodes, "adjacency shape mismatch after corruption"
+    return GraphWindow(x=x, a_hat=a_hat, num_nodes=g.num_nodes), stats
 
 
 def augment_graph(g: GraphWindow, edge_drop: float, feat_mask: float, rng: torch.Generator) -> GraphWindow:
@@ -273,21 +322,68 @@ def main() -> None:
     parser.add_argument("--tau", type=float, default=0.2)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--out_json", type=str, default="optc_topogcl_results.json")
+    parser.add_argument("--corruption_type", type=str, default="none", choices=["none", "node_features", "edges", "temporal"])
+    parser.add_argument("--corruption_rate", type=float, default=0.0)
+    parser.add_argument("--node_mask_mode", type=str, default="element", choices=["element", "dimension"])
+    parser.add_argument("--temporal_drop_mode", type=str, default="random", choices=["random", "window"])
+    parser.add_argument("--temporal_window_size", type=int, default=None)
+    parser.add_argument("--random_seed", type=int, default=42)
     args = parser.parse_args()
 
     assert os.path.exists(args.auth_path), "auth file not found"
     assert os.path.exists(args.red_path), "redteam file not found"
 
+    torch.manual_seed(args.random_seed)
+    rng = torch.Generator().manual_seed(args.random_seed)
+
+    print(
+        f"[INFO] dataset=OPTC corruption_type={args.corruption_type} "
+        f"mode={(args.node_mask_mode if args.corruption_type == 'node_features' else args.temporal_drop_mode if args.corruption_type == 'temporal' else 'n/a')} "
+        f"rate={args.corruption_rate}",
+        flush=True,
+    )
+
     def collect_graphs(path: str, limit: Optional[int], tag: str) -> List[GraphWindow]:
         out: List[GraphWindow] = []
+        total_events_before = 0
+        total_events_after = 0
+        total_edges_before = 0.0
+        total_edges_after = 0.0
+        total_masked_fraction = 0.0
         last = -1
-        for g in iter_graphs(path, limit=limit, window_size=args.window_size):
+        for rows in parse_lines_to_windows(path, window_size=args.window_size):
+            raw_rows = rows
+            if args.corruption_type == "temporal":
+                raw_rows, drop_stats = drop_raw_events(
+                    raw_rows,
+                    rate=args.corruption_rate,
+                    mode=args.temporal_drop_mode,
+                    window_size=args.temporal_window_size,
+                    rng=rng,
+                )
+                total_events_before += drop_stats["events_before"]
+                total_events_after += drop_stats["events_after"]
+            g = build_graph(raw_rows)
+            if args.corruption_type in {"node_features", "edges"}:
+                g, c_stats = apply_graph_corruption(g, args.corruption_type, args.corruption_rate, args.node_mask_mode, rng=rng)
+                total_edges_before += c_stats["edges_before"]
+                total_edges_after += c_stats["edges_after"]
+                total_masked_fraction += c_stats["masked_fraction"]
             out.append(g)
             if limit is not None and limit > 0:
                 p = int(100 * len(out) / limit)
                 if p != last and p <= 100 and p % 10 == 0:
                     print(f"loading {tag} {p}%", flush=True)
                     last = p
+            if limit is not None and len(out) >= limit:
+                break
+        if args.corruption_type == "temporal":
+            print(f"[INFO] {tag} events before={total_events_before} after={total_events_after}", flush=True)
+        if args.corruption_type == "edges":
+            print(f"[INFO] {tag} edges before={int(total_edges_before)} after={int(total_edges_after)}", flush=True)
+        if args.corruption_type == "node_features" and out:
+            avg_mask = 100.0 * total_masked_fraction / len(out)
+            print(f"[INFO] {tag} avg masked node-feature entries={avg_mask:.2f}%", flush=True)
         return out
 
     benign_graphs = collect_graphs(args.auth_path, args.benign_limit, "benign")
@@ -307,6 +403,7 @@ def main() -> None:
         feat_mask=args.feat_mask,
         tau=args.tau,
         batch_size=args.batch_size,
+        seed=args.random_seed,
     )
 
     center = compute_center(model, benign_graphs)
@@ -354,6 +451,12 @@ def main() -> None:
             "feat_mask": args.feat_mask,
             "tau": args.tau,
             "batch_size": args.batch_size,
+            "random_seed": args.random_seed,
+            "corruption_type": args.corruption_type,
+            "corruption_rate": args.corruption_rate,
+            "node_mask_mode": args.node_mask_mode,
+            "temporal_drop_mode": args.temporal_drop_mode,
+            "temporal_window_size": args.temporal_window_size,
         },
     }
 
@@ -364,5 +467,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
