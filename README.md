@@ -2,6 +2,13 @@
 
 ## Usage
 
+> ⚠️ Dataset files in this repo may be Git LFS pointers in a fresh clone. If runs parse zero windows, resolve data first:
+>
+> ```bash
+> git lfs install
+> git lfs pull
+> ```
+
 To run baseline GNN on OPTC (reproduce ids_results.json):
 
 ```bash

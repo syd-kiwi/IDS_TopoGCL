@@ -49,6 +49,15 @@ def parse_lines_to_windows(
         yield rows
 
 
+def _is_git_lfs_pointer(file_path: str) -> bool:
+    try:
+        with open(file_path, "r") as f:
+            first = f.readline().strip()
+        return first.startswith("version https://git-lfs.github.com/spec/v1")
+    except OSError:
+        return False
+
+
 def build_graph(rows: List[Tuple[int, int, int, int, int, int, int, int, int]]) -> GraphWindow:
     if not rows:
         x = torch.ones(1, 3)
@@ -332,6 +341,21 @@ def main() -> None:
 
     assert os.path.exists(args.auth_path), "auth file not found"
     assert os.path.exists(args.red_path), "redteam file not found"
+    if _is_git_lfs_pointer(args.auth_path) or _is_git_lfs_pointer(args.red_path):
+        raise RuntimeError(
+            "Input file is a Git LFS pointer, not real data. Run `git lfs install && git lfs pull` "
+            "then re-run with the resolved dataset files."
+        )
+
+    torch.manual_seed(args.random_seed)
+    rng = torch.Generator().manual_seed(args.random_seed)
+
+    print(
+        f"[INFO] dataset=OPTC corruption_type={args.corruption_type} "
+        f"mode={(args.node_mask_mode if args.corruption_type == 'node_features' else args.temporal_drop_mode if args.corruption_type == 'temporal' else 'n/a')} "
+        f"rate={args.corruption_rate}",
+        flush=True,
+    )
 
     torch.manual_seed(args.random_seed)
     rng = torch.Generator().manual_seed(args.random_seed)
@@ -389,7 +413,10 @@ def main() -> None:
     benign_graphs = collect_graphs(args.auth_path, args.benign_limit, "benign")
     mal_graphs = collect_graphs(args.red_path, args.mal_limit, "malicious")
     if not benign_graphs or not mal_graphs:
-        raise RuntimeError("Insufficient graphs parsed from inputs")
+        raise RuntimeError(
+            "Insufficient graphs parsed from inputs. Confirm files contain comma-separated 9-int rows "
+            "(not headers/LFS pointers) and that --window_size/limits are valid."
+        )
 
     in_dim = benign_graphs[0].x.shape[1]
     model = GCN(in_dim=in_dim, hidden_dim=args.hidden_dim, out_dim=args.emb_dim)
@@ -467,4 +494,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -47,6 +47,15 @@ def parse_csv_9ints_stream(
                 continue
 
 
+def _is_git_lfs_pointer(file_path: str) -> bool:
+    try:
+        with open(file_path, "r") as f:
+            first = f.readline().strip()
+        return first.startswith("version https://git-lfs.github.com/spec/v1")
+    except OSError:
+        return False
+
+
 def windows_from_stream(
     rows: Generator[Tuple[int, int, int, int, int, int, int, int, int], None, None],
     window_size: int,
@@ -507,6 +516,14 @@ def main() -> None:
     parser.add_argument("--temporal_window_size", type=int, default=None)
     parser.add_argument("--random_seed", type=int, default=42)
     args = parser.parse_args()
+    if _is_git_lfs_pointer(args.auth_path) or _is_git_lfs_pointer(args.red_path):
+        raise RuntimeError(
+            "Input file is a Git LFS pointer, not real data. Run `git lfs install && git lfs pull` "
+            "then re-run with the resolved dataset files."
+        )
+
+    torch.manual_seed(args.random_seed)
+    rng = torch.Generator().manual_seed(args.random_seed)
 
     torch.manual_seed(args.random_seed)
     rng = torch.Generator().manual_seed(args.random_seed)
