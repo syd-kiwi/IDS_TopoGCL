@@ -370,9 +370,18 @@ def main() -> None:
         flush=True,
     )
 
+    torch.manual_seed(args.random_seed)
+    rng = torch.Generator().manual_seed(args.random_seed)
+
+    print(
+        f"[INFO] dataset=OPTC corruption_type={args.corruption_type} "
+        f"mode={(args.node_mask_mode if args.corruption_type == 'node_features' else args.temporal_drop_mode if args.corruption_type == 'temporal' else 'n/a')} "
+        f"rate={args.corruption_rate}",
+        flush=True,
+    )
+
     def collect_graphs(path: str, limit: Optional[int], tag: str) -> List[GraphWindow]:
         out: List[GraphWindow] = []
-        mismatched_dim = 0
         total_events_before = 0
         total_events_after = 0
         total_edges_before = 0.0
@@ -392,8 +401,6 @@ def main() -> None:
                 total_events_before += drop_stats["events_before"]
                 total_events_after += drop_stats["events_after"]
             g = build_graph(raw_rows)
-            if g.x.dim() != 2 or g.x.shape[1] != 15:
-                mismatched_dim += 1
             if args.corruption_type in {"node_features", "edges"}:
                 g, c_stats = apply_graph_corruption(g, args.corruption_type, args.corruption_rate, args.node_mask_mode, rng=rng)
                 total_edges_before += c_stats["edges_before"]
@@ -414,8 +421,6 @@ def main() -> None:
         if args.corruption_type == "node_features" and out:
             avg_mask = 100.0 * total_masked_fraction / len(out)
             print(f"[INFO] {tag} avg masked node-feature entries={avg_mask:.2f}%", flush=True)
-        if mismatched_dim > 0:
-            print(f"[WARN] {tag} graphs with non-15 feature dims: {mismatched_dim} (will be coerced)", flush=True)
         return out
 
     benign_graphs = collect_graphs(args.auth_path, args.benign_limit, "benign")
@@ -426,12 +431,7 @@ def main() -> None:
             "(not headers/LFS pointers) and that --window_size/limits are valid."
         )
 
-    target_in_dim = 15
-    benign_graphs = [_coerce_feature_dim(g, target_dim=target_in_dim) for g in benign_graphs]
-    mal_graphs = [_coerce_feature_dim(g, target_dim=target_in_dim) for g in mal_graphs]
-    in_dim = target_in_dim
-    assert all(g.x.shape[1] == in_dim for g in benign_graphs), "Benign graph feature dims are inconsistent"
-    assert all(g.x.shape[1] == in_dim for g in mal_graphs), "Malicious graph feature dims are inconsistent"
+    in_dim = benign_graphs[0].x.shape[1]
     model = GCN(in_dim=in_dim, hidden_dim=args.hidden_dim, out_dim=args.emb_dim)
 
     train_contrastive(

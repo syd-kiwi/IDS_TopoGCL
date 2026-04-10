@@ -525,6 +525,9 @@ def main() -> None:
     torch.manual_seed(args.random_seed)
     rng = torch.Generator().manual_seed(args.random_seed)
 
+    torch.manual_seed(args.random_seed)
+    rng = torch.Generator().manual_seed(args.random_seed)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[OK] device: {device}", flush=True)
     print(
