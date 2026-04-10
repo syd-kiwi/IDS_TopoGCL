@@ -357,6 +357,16 @@ def main() -> None:
         flush=True,
     )
 
+    torch.manual_seed(args.random_seed)
+    rng = torch.Generator().manual_seed(args.random_seed)
+
+    print(
+        f"[INFO] dataset=OPTC corruption_type={args.corruption_type} "
+        f"mode={(args.node_mask_mode if args.corruption_type == 'node_features' else args.temporal_drop_mode if args.corruption_type == 'temporal' else 'n/a')} "
+        f"rate={args.corruption_rate}",
+        flush=True,
+    )
+
     def collect_graphs(path: str, limit: Optional[int], tag: str) -> List[GraphWindow]:
         out: List[GraphWindow] = []
         total_events_before = 0
