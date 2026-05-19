@@ -320,6 +320,16 @@ def main():
     ap.add_argument("--train_ratio", type=float, default=0.8, help="fraction of benign windows used for training")
     ap.add_argument("--threshold_q", type=float, default=0.99)
     ap.add_argument("--out_json", type=str, default="lanl_ids_results.json")
+    parser.add_argument("--train_scenario", type=str, default="clean", choices=["clean","low_volume","missing_structure","interference"])
+    parser.add_argument("--test_scenario", type=str, default="clean", choices=["clean","low_volume","missing_structure","interference"])
+    parser.add_argument("--train_degradation_rate", type=float, default=0.0)
+    parser.add_argument("--test_degradation_rate", type=float, default=0.0)
+    parser.add_argument("--low_volume_mode", type=str, default="events", choices=["events","edges","windows"])
+    parser.add_argument("--missing_structure_mode", type=str, default="both", choices=["nodes","edges","both"])
+    parser.add_argument("--interference_mode", type=str, default="mixed", choices=["feature_noise","feature_mask","delay","mixed"])
+    parser.add_argument("--noise_std", type=float, default=0.1)
+    parser.add_argument("--delay_steps", type=int, default=1)
+
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

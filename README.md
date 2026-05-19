@@ -143,3 +143,25 @@ for rate in 0.0 0.1 0.2 0.3 0.4; do
     --out_json "optc_topogcl_edges_${rate}.json"
 done
 ```
+
+## Installation
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Tactical imperfect data experiments
+- **low_volume**: IDS observes less data (event/edge/window subsampling).
+- **missing_structure**: nodes/edges are missing.
+- **interference**: noisy, delayed, or corrupted observations.
+
+```bash
+bash scripts/run_clean_results.sh
+bash scripts/run_low_volume_sweep.sh
+bash scripts/run_missing_structure_sweep.sh
+bash scripts/run_interference_sweep.sh
+bash scripts/run_all_experiments.sh
+python scripts/aggregate_results.py
+python scripts/plot_results.py
+```

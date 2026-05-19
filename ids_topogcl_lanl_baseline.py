@@ -515,6 +515,16 @@ def main() -> None:
     parser.add_argument("--temporal_drop_mode", type=str, default="random", choices=["random", "window"])
     parser.add_argument("--temporal_window_size", type=int, default=None)
     parser.add_argument("--random_seed", type=int, default=42)
+    parser.add_argument("--train_scenario", type=str, default="clean", choices=["clean","low_volume","missing_structure","interference"])
+    parser.add_argument("--test_scenario", type=str, default="clean", choices=["clean","low_volume","missing_structure","interference"])
+    parser.add_argument("--train_degradation_rate", type=float, default=0.0)
+    parser.add_argument("--test_degradation_rate", type=float, default=0.0)
+    parser.add_argument("--low_volume_mode", type=str, default="events", choices=["events","edges","windows"])
+    parser.add_argument("--missing_structure_mode", type=str, default="both", choices=["nodes","edges","both"])
+    parser.add_argument("--interference_mode", type=str, default="mixed", choices=["feature_noise","feature_mask","delay","mixed"])
+    parser.add_argument("--noise_std", type=float, default=0.1)
+    parser.add_argument("--delay_steps", type=int, default=1)
+
     args = parser.parse_args()
     if _is_git_lfs_pointer(args.auth_path) or _is_git_lfs_pointer(args.red_path):
         raise RuntimeError(
