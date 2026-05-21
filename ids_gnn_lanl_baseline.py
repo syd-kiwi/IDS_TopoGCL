@@ -6,6 +6,8 @@ from typing import Dict, Generator, List, Optional, Tuple
 
 import torch
 
+from src.data_corruptions import drop_edges, drop_nodes, drop_raw_events, mask_node_features
+
 
 # -----------------------------
 # Data structures
@@ -302,6 +304,67 @@ def split_train_test_benign(
     return ordered[:split_idx], ordered[split_idx:]
 
 
+def _is_git_lfs_pointer(file_path: str) -> bool:
+    try:
+        with open(file_path, "r") as f:
+            return f.readline().strip().startswith("version https://git-lfs.github.com/spec/v1")
+    except OSError:
+        return False
+
+
+def scenario_to_corruption(scenario: str):
+    return {
+        "clean": "none",
+        "low_volume": "low_volume",
+        "missing_structure": "missing_structure",
+        "interference": "interference",
+    }[scenario]
+
+
+def apply_scenario_raw_rows(rows, scenario, rate, low_volume_mode, rng):
+    stats = {"events_before": len(rows), "events_after": len(rows)}
+    if scenario == "low_volume" and rate > 0 and low_volume_mode == "events":
+        out, st = drop_raw_events(rows, rate=rate, mode="random", rng=rng)
+        stats.update(st)
+        return out, stats
+    return rows, stats
+
+
+def apply_scenario_graph(gw, scenario, rate, missing_structure_mode, interference_mode, rng):
+    stats = {"nodes_before": gw.num_nodes, "nodes_after": gw.num_nodes, "edges_before": int(gw.a_hat._nnz()), "edges_after": int(gw.a_hat._nnz()), "masked_fraction": 0.0}
+    if scenario == "clean" or rate <= 0:
+        return gw, stats
+    x=gw.x
+    a=gw.a_hat.to_dense()
+    n=gw.num_nodes
+    if scenario == "low_volume":
+        if n>1:
+            keep = (torch.rand(n, generator=rng) > rate).float().unsqueeze(1)
+            x = x*keep
+            stats["masked_fraction"] = float((keep==0).float().mean().item())
+    elif scenario == "missing_structure":
+        if missing_structure_mode in {"edges","both"}:
+            nz=(a>0).nonzero(as_tuple=False).t()
+            if nz.numel()>0:
+                ne,_,est=drop_edges(nz, rate=rate, rng=rng)
+                anew=torch.zeros_like(a)
+                if ne.numel()>0: anew[ne[0],ne[1]]=1.0
+                a=anew
+                stats["edges_before"]=est["edges_before"]; stats["edges_after"]=est["edges_after"]
+        if missing_structure_mode in {"nodes","both"}:
+            x2, ne, nst = drop_nodes(x, (a>0).nonzero(as_tuple=False).t() if a.numel()>0 else torch.zeros((2,0),dtype=torch.long), rate=rate, rng=rng)
+            x=x2; n=x.shape[0]
+            anew=torch.zeros((n,n),dtype=a.dtype)
+            if ne.numel()>0: anew[ne[0],ne[1]]=1.0
+            a=anew
+            stats["nodes_before"]=nst["nodes_before"]; stats["nodes_after"]=nst["nodes_after"]
+    elif scenario == "interference":
+        x, mst = mask_node_features(x, rate=rate, mode="element", rng=rng)
+        stats["masked_fraction"] = mst["masked_fraction"]
+    d=a.sum(dim=1).clamp_min(1.0); inv=torch.pow(d,-0.5); a_hat=inv.unsqueeze(1)*a*inv.unsqueeze(0)
+    return GraphWindow(x=x,a_hat=a_hat.to_sparse().coalesce(),num_nodes=x.shape[0],window_start=gw.window_start), stats
+
+
 # -----------------------------
 # Main
 # -----------------------------
@@ -332,6 +395,9 @@ def main():
 
     args = ap.parse_args()
 
+    if _is_git_lfs_pointer(args.auth_path) or _is_git_lfs_pointer(args.red_path):
+        raise RuntimeError("Input file is a Git LFS pointer, not real data. Run `git lfs install` and `git lfs pull`.")
+    rng = torch.Generator().manual_seed(42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[OK] device: {device}")
 
@@ -355,17 +421,27 @@ def main():
     if len(d_mal) == 0:
         print("[WARN] No malicious graphs parsed. Metrics will be degenerate. Fix your converter overlap.")
 
-    model = GraphAutoModel(in_dim=15, hidden_dim=args.hidden_dim, emb_dim=args.emb_dim).to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
-
     benign_train, benign_test = split_train_test_benign(d_benign, args.train_ratio)
     if len(benign_test) == 0:
         print("[WARN] Not enough benign windows to create a holdout test split; metrics will use training windows.")
         benign_test = benign_train
 
+    print(f"[INFO] applying train scenario={args.train_scenario} rate={args.train_degradation_rate} to benign_train")
+    proc_train=[]
+    for g in benign_train:
+        g2, st = apply_scenario_graph(g, args.train_scenario, args.train_degradation_rate, args.missing_structure_mode, args.interference_mode, rng)
+        proc_train.append(g2)
+    benign_train = proc_train
+
+    print(f"[INFO] applying test scenario={args.test_scenario} rate={args.test_degradation_rate} to benign_test and malicious")
+    benign_test=[apply_scenario_graph(g, args.test_scenario, args.test_degradation_rate, args.missing_structure_mode, args.interference_mode, rng)[0] for g in benign_test]
+    d_mal=[apply_scenario_graph(g, args.test_scenario, args.test_degradation_rate, args.missing_structure_mode, args.interference_mode, rng)[0] for g in d_mal]
+
     print(f"[OK] benign split train={len(benign_train)} test={len(benign_test)}")
 
     # Train on benign only
+    model = GraphAutoModel(in_dim=15, hidden_dim=args.hidden_dim, emb_dim=args.emb_dim).to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     model.train()
     for ep in range(args.epochs):
         total = 0.0
@@ -421,6 +497,15 @@ def main():
 
     # Your exact requested structure
     results = {
+        "dataset": "lanl",
+        "method": "gnn",
+        "train_scenario": args.train_scenario,
+        "test_scenario": args.test_scenario,
+        "train_degradation_rate": args.train_degradation_rate,
+        "test_degradation_rate": args.test_degradation_rate,
+        "low_volume_mode": args.low_volume_mode,
+        "missing_structure_mode": args.missing_structure_mode,
+        "interference_mode": args.interference_mode,
         "num_benign_windows": len(d_benign),
         "num_mal_windows": len(d_mal),
         "threshold_q": round(args.threshold_q, 2),
