@@ -490,6 +490,31 @@ def split_train_test_benign(
     return ordered[:split_idx], ordered[split_idx:]
 
 
+def _scenario_apply_graphs(graphs, scenario, rate, args, rng, tag):
+    print(f"[INFO] {tag}: scenario={scenario} rate={rate}", flush=True)
+    out=[]
+    edges_b=edges_a=nodes_b=nodes_a=0
+    masked=0.0
+    for g in graphs:
+        g2=g
+        if scenario=="low_volume" and rate>0:
+            if args.low_volume_mode=="windows":
+                if torch.rand(1, generator=rng).item() < rate:
+                    continue
+            else:
+                e,_,st=drop_edges(g2.edges_undirected, rate=rate, rng=rng)
+                g2=GraphWindow(x=g2.x, edges_undirected=e, num_nodes=g2.num_nodes, window_start=g2.window_start)
+                edges_b += st["edges_before"]; edges_a += st["edges_after"]
+        elif scenario=="missing_structure" and rate>0:
+            if args.missing_structure_mode in {"edges","both"}:
+                e,_,st=drop_edges(g2.edges_undirected, rate=rate, rng=rng); g2=GraphWindow(x=g2.x, edges_undirected=e, num_nodes=g2.num_nodes, window_start=g2.window_start); edges_b+=st["edges_before"]; edges_a+=st["edges_after"]
+        elif scenario=="interference" and rate>0:
+            x,st=mask_node_features(g2.x, rate=rate, mode=args.node_mask_mode, rng=rng); g2=GraphWindow(x=x, edges_undirected=g2.edges_undirected, num_nodes=g2.num_nodes, window_start=g2.window_start); masked += st["masked_fraction"]
+        nodes_b += g.num_nodes; nodes_a += g2.num_nodes
+        out.append(g2)
+    print(f"[INFO] {tag} nodes before={nodes_b} after={nodes_a} edges before={edges_b} after={edges_a} masked_avg={(100*masked/max(len(out),1)):.2f}%", flush=True)
+    return out
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="TopoGCL style IDS baseline for LANL with sparse graphs")
     parser.add_argument("--auth_path", type=str, required=True, help="converted benign csv (9 ints)")
@@ -611,6 +636,10 @@ def main() -> None:
         print("[WARN] Not enough benign windows to create a holdout test split; metrics will use training windows.", flush=True)
         benign_test = benign_train
 
+    benign_train = _scenario_apply_graphs(benign_train, args.train_scenario, args.train_degradation_rate, args, rng, "benign_train")
+    benign_test = _scenario_apply_graphs(benign_test, args.test_scenario, args.test_degradation_rate, args, rng, "benign_test")
+    mal_graphs = _scenario_apply_graphs(mal_graphs, args.test_scenario, args.test_degradation_rate, args, rng, "malicious")
+
     print(f"[OK] benign split train={len(benign_train)} test={len(benign_test)}", flush=True)
 
     train_contrastive(
@@ -653,6 +682,15 @@ def main() -> None:
     auc = roc_auc(y_score, y_true)
 
     results = {
+        "dataset": "lanl",
+        "method": "topogcl",
+        "train_scenario": args.train_scenario,
+        "test_scenario": args.test_scenario,
+        "train_degradation_rate": args.train_degradation_rate,
+        "test_degradation_rate": args.test_degradation_rate,
+        "low_volume_mode": args.low_volume_mode,
+        "missing_structure_mode": args.missing_structure_mode,
+        "interference_mode": args.interference_mode,
         "num_benign_windows": len(benign_graphs),
         "num_mal_windows": len(d_mal),
         "threshold_q": round(args.threshold_q, 2),
