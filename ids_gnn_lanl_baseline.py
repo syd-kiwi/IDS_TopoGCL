@@ -9,6 +9,16 @@ import torch
 from src.data_corruptions import drop_edges, drop_nodes, drop_raw_events, mask_node_features
 
 
+def score_stats(values):
+    if not values:
+        return {"min": None, "mean": None, "max": None}
+    return {
+        "min": round(float(min(values)), 8),
+        "mean": round(float(sum(values) / len(values)), 8),
+        "max": round(float(max(values)), 8)
+    }
+
+
 # -----------------------------
 # Data structures
 # -----------------------------
@@ -399,7 +409,7 @@ def main():
 
     if _is_git_lfs_pointer(args.auth_path) or _is_git_lfs_pointer(args.red_path):
         raise RuntimeError("Input file is a Git LFS pointer, not real data. Run `git lfs install` and `git lfs pull`.")
-    rng = torch.Generator().manual_seed(42)
+    rng = torch.Generator().manual_seed(args.random_seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[OK] device: {device}")
 
