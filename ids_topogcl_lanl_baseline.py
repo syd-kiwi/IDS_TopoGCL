@@ -10,6 +10,16 @@ import torch
 from src.data_corruptions import drop_edges, drop_raw_events, mask_node_features
 
 
+def score_stats(values):
+    if not values:
+        return {"min": None, "mean": None, "max": None}
+    return {
+        "min": round(float(min(values)), 8),
+        "mean": round(float(sum(values) / len(values)), 8),
+        "max": round(float(max(values)), 8)
+    }
+
+
 # =========================================================
 # Data container
 # =========================================================
@@ -694,7 +704,12 @@ def main() -> None:
         "num_benign_windows": len(benign_graphs),
         "num_mal_windows": len(d_mal),
         "threshold_q": round(args.threshold_q, 2),
-        "threshold": round(thr, 2),
+        "threshold": round(float(thr), 8),
+        "score_stats": {
+            "benign_train": score_stats(d_benign_train),
+            "benign_test": score_stats(d_benign_test),
+            "malicious": score_stats(d_mal)
+        },
         "metrics": {
             "accuracy": round(acc, 2),
             "precision": round(precision, 2),
