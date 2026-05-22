@@ -1,0 +1,48 @@
+{
+  "dataset": "lanl",
+  "method": "gnn",
+  "train_scenario": "low_volume",
+  "test_scenario": "low_volume",
+  "train_degradation_rate": 0.4,
+  "test_degradation_rate": 0.4,
+  "low_volume_mode": "events",
+  "missing_structure_mode": "both",
+  "interference_mode": "mixed",
+  "num_benign_windows": 86,
+  "num_mal_windows": 290,
+  "threshold_q": 0.99,
+  "threshold": 0.00187044,
+  "score_stats": {
+    "benign_train": {
+      "min": 1.45e-06,
+      "mean": 0.00010293,
+      "max": 0.00533577
+    },
+    "benign_test": {
+      "min": 2.04e-06,
+      "mean": 0.00012469,
+      "max": 0.00056163
+    },
+    "malicious": {
+      "min": 0.0242373,
+      "mean": 0.05122639,
+      "max": 0.08319084
+    }
+  },
+  "metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "tpr": 1.0,
+    "fpr": 0.0,
+    "auroc": 1.0
+  },
+  "training": {
+    "epochs": 3,
+    "lr": 0.001,
+    "hidden_dim": 32,
+    "emb_dim": 16,
+    "random_seed": 45
+  }
+}
