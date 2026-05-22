@@ -546,9 +546,15 @@ if __name__ == "__main__":
     main()
 def score_stats(values):
     if not values:
-        return {"min": None, "mean": None, "max": None}
+        return {
+            "min": None,
+            "mean": None,
+            "max": None,
+        }
+
+    vals = [float(v) for v in values]
     return {
-        "min": round(float(min(values)), 8),
-        "mean": round(float(sum(values) / len(values)), 8),
-        "max": round(float(max(values)), 8)
+        "min": round(min(vals), 8),
+        "mean": round(sum(vals) / len(vals), 8),
+        "max": round(max(vals), 8),
     }
