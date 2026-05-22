@@ -1,0 +1,1 @@
+path,dataset,method,train_scenario,test_scenario,train_degradation_rate,test_degradation_rate,accuracy,precision,recall,f1,fpr,auroc

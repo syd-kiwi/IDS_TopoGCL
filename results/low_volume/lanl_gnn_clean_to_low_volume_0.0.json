@@ -1,4 +1,13 @@
 {
+  "dataset": "lanl",
+  "method": "gnn",
+  "train_scenario": "clean",
+  "test_scenario": "low_volume",
+  "train_degradation_rate": 0.0,
+  "test_degradation_rate": 0.0,
+  "low_volume_mode": "events",
+  "missing_structure_mode": "both",
+  "interference_mode": "mixed",
   "num_benign_windows": 86,
   "num_mal_windows": 290,
   "threshold_q": 0.99,

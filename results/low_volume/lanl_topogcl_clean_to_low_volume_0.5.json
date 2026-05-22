@@ -1,10 +1,10 @@
 {
   "dataset": "lanl",
   "method": "topogcl",
-  "train_scenario": "low_volume",
+  "train_scenario": "clean",
   "test_scenario": "low_volume",
-  "train_degradation_rate": 0.4,
-  "test_degradation_rate": 0.4,
+  "train_degradation_rate": 0.0,
+  "test_degradation_rate": 0.5,
   "low_volume_mode": "events",
   "missing_structure_mode": "both",
   "interference_mode": "mixed",
@@ -13,12 +13,12 @@
   "threshold_q": 0.99,
   "threshold": 0.04,
   "metrics": {
-    "accuracy": 1.0,
-    "precision": 1.0,
+    "accuracy": 0.94,
+    "precision": 0.94,
     "recall": 1.0,
-    "f1": 1.0,
+    "f1": 0.97,
     "tpr": 1.0,
-    "fpr": 0.0,
+    "fpr": 1.0,
     "auroc": 1.0
   },
   "training": {
