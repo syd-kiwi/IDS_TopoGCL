@@ -9,6 +9,16 @@ import torch
 from src.data_corruptions import drop_edges, drop_nodes, drop_raw_events, mask_node_features
 
 
+def score_stats(values):
+    if not values:
+        return {"min": None, "mean": None, "max": None}
+    return {
+        "min": round(float(min(values)), 8),
+        "mean": round(float(sum(values) / len(values)), 8),
+        "max": round(float(max(values)), 8)
+    }
+
+
 # -----------------------------
 # Data structures
 # -----------------------------
@@ -383,6 +393,7 @@ def main():
     ap.add_argument("--train_ratio", type=float, default=0.8, help="fraction of benign windows used for training")
     ap.add_argument("--threshold_q", type=float, default=0.99)
     ap.add_argument("--out_json", type=str, default="lanl_ids_results.json")
+    ap.add_argument("--random_seed", type=int, default=42)
     ap.add_argument("--train_scenario", type=str, default="clean", choices=["clean","low_volume","missing_structure","interference"])
     ap.add_argument("--test_scenario", type=str, default="clean", choices=["clean","low_volume","missing_structure","interference"])
     ap.add_argument("--train_degradation_rate", type=float, default=0.0)
@@ -394,10 +405,11 @@ def main():
     ap.add_argument("--delay_steps", type=int, default=1)
 
     args = ap.parse_args()
+    torch.manual_seed(args.random_seed)
 
     if _is_git_lfs_pointer(args.auth_path) or _is_git_lfs_pointer(args.red_path):
         raise RuntimeError("Input file is a Git LFS pointer, not real data. Run `git lfs install` and `git lfs pull`.")
-    rng = torch.Generator().manual_seed(42)
+    rng = torch.Generator().manual_seed(args.random_seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[OK] device: {device}")
 
@@ -509,7 +521,12 @@ def main():
         "num_benign_windows": len(d_benign),
         "num_mal_windows": len(d_mal),
         "threshold_q": round(args.threshold_q, 2),
-        "threshold": round(thr, 2),
+        "threshold": round(float(thr), 8),
+        "score_stats": {
+            "benign_train": score_stats(train_scores),
+            "benign_test": score_stats(benign_scores),
+            "malicious": score_stats(mal_scores)
+        },
         "metrics": {
             "accuracy": round(acc, 2),
             "precision": round(precision, 2),
@@ -524,6 +541,7 @@ def main():
             "lr": args.lr,
             "hidden_dim": args.hidden_dim,
             "emb_dim": args.emb_dim,
+            "random_seed": args.random_seed,
         },
     }
 

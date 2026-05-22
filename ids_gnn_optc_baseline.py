@@ -8,6 +8,16 @@ from typing import Dict, Generator, Iterable, List, Tuple, Optional
 import torch
 
 
+def score_stats(values):
+    if not values:
+        return {"min": None, "mean": None, "max": None}
+    return {
+        "min": round(float(min(values)), 8),
+        "mean": round(float(sum(values) / len(values)), 8),
+        "max": round(float(max(values)), 8)
+    }
+
+
 @dataclass
 class GraphWindow:
     """Graph data for a 300s window.
@@ -250,7 +260,9 @@ def main() -> None:
     parser.add_argument("--mal_limit", type=int, default=2000)
     parser.add_argument("--threshold_q", type=float, default=0.99)
     parser.add_argument("--out_json", type=str, default="optc_gnn_results.json")
+    parser.add_argument("--random_seed", type=int, default=42)
     args = parser.parse_args()
+    torch.manual_seed(args.random_seed)
 
     assert os.path.exists(args.auth_path), "auth file not found"
     assert os.path.exists(args.red_path), "redteam file not found"
@@ -307,7 +319,12 @@ def main() -> None:
         "num_benign_windows": len(d_benign),
         "num_mal_windows": len(d_mal),
         "threshold_q": round(args.threshold_q, 2),
-        "threshold": round(thr, 2),
+        "threshold": round(float(thr), 8),
+        "score_stats": {
+            "benign_train": score_stats(d_benign),
+            "benign_test": score_stats(d_benign),
+            "malicious": score_stats(d_mal)
+        },
         "metrics": {
             "accuracy": round(acc, 2),
             "precision": round(precision, 2),
@@ -322,6 +339,7 @@ def main() -> None:
             "lr": args.lr,
             "hidden_dim": args.hidden_dim,
             "emb_dim": args.emb_dim,
+            "random_seed": args.random_seed,
         },
     }
 
@@ -333,5 +351,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
