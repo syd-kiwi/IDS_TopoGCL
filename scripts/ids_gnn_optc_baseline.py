@@ -261,8 +261,28 @@ def main() -> None:
     parser.add_argument("--threshold_q", type=float, default=0.99)
     parser.add_argument("--out_json", type=str, default="optc_gnn_results.json")
     parser.add_argument("--random_seed", type=int, default=42)
+    # Backward-compatible aliases used by other experiment runners.
+    # This baseline does not currently apply scenario corruptions; these flags are accepted
+    # so shared launch commands do not fail argument parsing.
+    parser.add_argument(
+        "--scenario",
+        type=str,
+        default="none",
+        choices=["none", "edge_drop", "feature_mask", "event_drop", "temporal_drop"],
+    )
+    parser.add_argument("--scenario_rate", type=float, default=0.0)
     args = parser.parse_args()
     torch.manual_seed(args.random_seed)
+
+    if args.scenario != "none" and args.scenario_rate > 0:
+        print(
+            (
+                "[WARN] --scenario/--scenario_rate were provided, but "
+                "ids_gnn_optc_baseline.py does not implement scenario corruptions yet. "
+                "Proceeding with clean data."
+            ),
+            flush=True,
+        )
 
     assert os.path.exists(args.auth_path), "auth file not found"
     assert os.path.exists(args.red_path), "redteam file not found"
@@ -340,6 +360,8 @@ def main() -> None:
             "hidden_dim": args.hidden_dim,
             "emb_dim": args.emb_dim,
             "random_seed": args.random_seed,
+            "scenario": args.scenario,
+            "scenario_rate": args.scenario_rate,
         },
     }
 
@@ -351,4 +373,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
