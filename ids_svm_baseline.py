@@ -8,7 +8,7 @@ from typing import Dict, Generator, Iterable, List, Optional, Tuple
 import torch
 from sklearn.svm import OneClassSVM
 
-from src.data_corruptions import drop_edges
+from scripts.data_corruptions import drop_edges
 
 
 def score_stats(values: List[float]):

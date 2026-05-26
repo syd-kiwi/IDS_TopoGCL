@@ -11,7 +11,7 @@ This repository is now focused on exactly three research questions:
 - `ids_topogcl_optc_baseline.py`, `ids_topogcl_lanl_baseline.py`
 - `ids_gnn_optc_baseline.py`, `ids_gnn_lanl_baseline.py`
 - `ids_svm_baseline.py` (new one-class SVM baseline)
-- `src/data_corruptions.py` (edge drop utilities)
+- `scripts/data_corruptions.py` (edge drop utilities)
 - `scripts/run_edge_removal_study.sh`
 - `scripts/summarize_edge_removal.py`
 
