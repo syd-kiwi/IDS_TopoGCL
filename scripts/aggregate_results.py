@@ -10,7 +10,8 @@ METRICS = ["accuracy", "precision", "recall", "f1", "fpr", "auroc"]
 
 
 rows = []
-for p in glob.glob("results/**/*.json", recursive=True):
+json_paths = sorted(set(glob.glob("results/**/*.json", recursive=True) + glob.glob("results/fast_lanl/*.json")))
+for p in json_paths:
     with open(p) as f:
         d = json.load(f)
     m = d.get("metrics", {})
