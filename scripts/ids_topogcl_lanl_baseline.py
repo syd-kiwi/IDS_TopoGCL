@@ -7,7 +7,7 @@ from typing import Dict, Generator, Iterable, List, Optional, Tuple
 
 import torch
 
-from scripts.data_corruptions import drop_edges, drop_raw_events, mask_node_features
+from data_corruptions import drop_edges, drop_raw_events, mask_node_features
 
 
 def score_stats(values):
