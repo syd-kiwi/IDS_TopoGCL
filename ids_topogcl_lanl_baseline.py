@@ -263,6 +263,8 @@ def apply_graph_corruption(
 
 # =========================================================
 # Augmentation: edge drop and feature mask
+# NOTE: Scenario degradation simulates imperfect telemetry.
+# TopoGCL augmentation creates contrastive views during training.
 # =========================================================
 def augment_graph(
     g: GraphWindow,
@@ -554,9 +556,9 @@ def main() -> None:
     parser.add_argument("--test_scenario", type=str, default="clean", choices=["clean","low_volume","missing_structure","interference"])
     parser.add_argument("--train_degradation_rate", type=float, default=0.0)
     parser.add_argument("--test_degradation_rate", type=float, default=0.0)
-    parser.add_argument("--low_volume_mode", type=str, default="events", choices=["events","edges","windows"])
-    parser.add_argument("--missing_structure_mode", type=str, default="both", choices=["nodes","edges","both"])
-    parser.add_argument("--interference_mode", type=str, default="mixed", choices=["feature_noise","feature_mask","delay","mixed"])
+    parser.add_argument("--low_volume_mode", type=str, default="events", choices=["events"])
+    parser.add_argument("--missing_structure_mode", type=str, default="edges", choices=["edges"])
+    parser.add_argument("--interference_mode", type=str, default="feature_mask", choices=["feature_mask"])
     parser.add_argument("--noise_std", type=float, default=0.1)
     parser.add_argument("--delay_steps", type=int, default=1)
 
