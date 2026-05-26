@@ -38,23 +38,48 @@ class GraphWindow:
 def parse_csv_9ints_stream(
     file_path: str,
 ) -> Generator[Tuple[int, int, int, int, int, int, int, int, int], None, None]:
+    token_ids: Dict[str, int] = {}
+    def tok_id(tok: str) -> int:
+        v = token_ids.get(tok)
+        if v is None:
+            v = len(token_ids) + 1
+            token_ids[tok] = v
+        return v
+
     with open(file_path, "r") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             parts = line.split(",")
-            if len(parts) != 9:
+            if len(parts) < 2:
                 continue
             try:
                 t = int(parts[0])
-                yield (
-                    t,
-                    int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4]),
-                    int(parts[5]), int(parts[6]), int(parts[7]), int(parts[8]),
-                )
             except Exception:
                 continue
+
+            # Preferred path: already-converted 9-int format.
+            if len(parts) >= 9:
+                try:
+                    yield (
+                        t,
+                        int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4]),
+                        int(parts[5]), int(parts[6]), int(parts[7]), int(parts[8]),
+                    )
+                    continue
+                except Exception:
+                    pass
+
+            # Fallback path: raw LANL categorical rows (header allowed).
+            if parts[0].lower() in {"time", "timestamp"}:
+                continue
+            p = parts + [""] * (9 - len(parts))
+            yield (
+                t,
+                tok_id(p[1]), tok_id(p[2]), tok_id(p[3]), tok_id(p[4]),
+                tok_id(p[5]), tok_id(p[6]), tok_id(p[7]), tok_id(p[8]),
+            )
 
 
 def _is_git_lfs_pointer(file_path: str) -> bool:
