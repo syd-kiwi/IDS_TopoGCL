@@ -3,3 +3,8 @@ data
 sydney-key.ssh
 sydney-key.ssh.pub
 data.zip
+
+# Large local datasets
+datasets/LANL/auth.txt
+datasets/LANL/redteam.txt
+datasets/ACI/
