@@ -1,1 +1,0 @@
-path,dataset,method,seed,train_scenario,test_scenario,train_degradation_rate,test_degradation_rate,accuracy,precision,recall,f1,fpr,auroc,benign_train_min,benign_train_mean,benign_train_max,benign_test_min,benign_test_mean,benign_test_max,malicious_min,malicious_mean,malicious_max
