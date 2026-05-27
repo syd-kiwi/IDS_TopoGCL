@@ -239,7 +239,7 @@ def compute_center(model: GCN, graphs: Iterable[GraphWindow]) -> torch.Tensor:
         for g in graphs:
             embs.append(model(g.x, g.a_hat))
     if not embs:
-        return torch.zeros(model.w2.out_features)
+        return torch.zeros(model.w2.out_features, device=model.w2.weight.device)
     return torch.stack(embs, dim=0).mean(dim=0)
 
 
@@ -339,8 +339,8 @@ def roc_auc(scores: List[float], labels: List[int]) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="TopoGCL-inspired IDS baseline (single-file)")
-    parser.add_argument("--auth_path", type=str, default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/OPTC/auth_optc.txt")
-    parser.add_argument("--red_path", type=str, default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/OPTC/redteam_optc.txt")
+    parser.add_argument("--auth_path", type=str, default="datasets/OPTC/auth_optc.txt")
+    parser.add_argument("--red_path", type=str, default="datasets/OPTC/redteam_optc.txt")
     parser.add_argument("--window_size", type=int, default=1)
     parser.add_argument("--hidden_dim", type=int, default=32)
     parser.add_argument("--emb_dim", type=int, default=16)
@@ -371,6 +371,9 @@ def main() -> None:
     parser.add_argument("--delay_steps", type=int, default=1)
 
     args = parser.parse_args()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[INFO] using device={device}", flush=True)
 
     assert os.path.exists(args.auth_path), "auth file not found"
     assert os.path.exists(args.red_path), "redteam file not found"
@@ -426,6 +429,7 @@ def main() -> None:
                 total_edges_before += c_stats["edges_before"]
                 total_edges_after += c_stats["edges_after"]
                 total_masked_fraction += c_stats["masked_fraction"]
+            g = GraphWindow(x=g.x.to(device), a_hat=g.a_hat.to(device), num_nodes=g.num_nodes)
             out.append(g)
             if limit is not None and limit > 0:
                 p = int(100 * len(out) / limit)
@@ -452,7 +456,7 @@ def main() -> None:
         )
 
     in_dim = benign_graphs[0].x.shape[1]
-    model = GCN(in_dim=in_dim, hidden_dim=args.hidden_dim, out_dim=args.emb_dim)
+    model = GCN(in_dim=in_dim, hidden_dim=args.hidden_dim, out_dim=args.emb_dim).to(device)
 
     train_contrastive(
         model,

@@ -3,8 +3,8 @@
 
 import random
 
-INPUT_PATH = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/LANL/auth.txt"
-OUTPUT_PATH = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/LANL/auth_30pct.txt"
+INPUT_PATH = "datasets/LANL/auth.txt"
+OUTPUT_PATH = "datasets/LANL/auth_30pct.txt"
 FRACTION = 0.30
 SEED = 42
 HAS_HEADER = True
