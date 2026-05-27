@@ -1,0 +1,10 @@
+label_ratio,model,labeled_benign,labeled_malicious
+0.1,svm,129,17
+0.1,gnn,129,17
+0.1,topogcl,129,17
+0.5,svm,647,85
+0.5,gnn,647,85
+0.5,topogcl,647,85
+1.0,svm,1294,171
+1.0,gnn,1294,171
+1.0,topogcl,1294,171
