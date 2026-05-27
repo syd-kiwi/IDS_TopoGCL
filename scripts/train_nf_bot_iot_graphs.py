@@ -128,7 +128,7 @@ def train_gnn(train_graphs: list[Data], train_y: np.ndarray, eval_graphs: list[D
 
 
 def main() -> None:
-    graph_dir = Path("datasets/NF-BoT-IoT/Graph")
+    graph_dir = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph")
     out_csv = Path("results/nf_bot_iot_graph_debug/summary.csv")
     seed = 42
 
