@@ -1,39 +1,20 @@
 from pathlib import Path
-import numpy as np
 import pandas as pd
 
-base = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph")
+df = pd.read_csv("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph/graph_window_summary.csv")
 
-if not base.exists():
-    print("DEBUG folder not found. Available benchmark folders:")
-    for p in Path("datasets").glob("IDS_GRAPH_BENCHMARK*"):
-        print(p)
-    raise SystemExit
+print("Graphs:", len(df))
+print("\nLabels:")
+print(df["graph_label"].value_counts())
 
-files = sorted(base.rglob("*.npz"))
-print("Graph files:", len(files))
+print("\nNodes:")
+print(df["num_nodes"].describe())
 
-for f in files[:3]:
-    print("\nFILE:", f)
-    data = np.load(f, allow_pickle=True)
-    print("Keys:", data.files)
-    for k in data.files:
-        arr = data[k]
-        print(k, arr.shape, arr.dtype)
+print("\nEdges:")
+print(df["num_edges"].describe())
 
-summary = base / "graph_window_summary.csv"
-if summary.exists():
-    df = pd.read_csv(summary)
-    print("\nSummary rows:", len(df))
-    print(df.head())
+print("\nAttack flows:")
+print(df["num_attack_flows"].describe())
 
-    print("\nGraph labels:")
-    print(df["graph_label"].value_counts())
-
-    print("\nNode count stats:")
-    print(df["num_nodes"].describe())
-
-    print("\nEdge count stats:")
-    print(df["num_edges"].describe())
-else:
-    print("\nNo graph_window_summary.csv found")
+print("\nBenign flows:")
+print(df["num_benign_flows"].describe())
