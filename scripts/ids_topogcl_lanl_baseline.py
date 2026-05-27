@@ -46,6 +46,18 @@ def parse_csv_9ints_stream(
             token_ids[tok] = v
         return v
 
+    def parse_time(token: str) -> Optional[int]:
+        t = token.strip()
+        if not t:
+            return None
+        try:
+            return int(t)
+        except Exception:
+            try:
+                return int(float(t))
+            except Exception:
+                return None
+
     with open(file_path, "r") as f:
         for line in f:
             line = line.strip()
@@ -54,9 +66,8 @@ def parse_csv_9ints_stream(
             parts = line.split(",")
             if len(parts) < 2:
                 continue
-            try:
-                t = int(parts[0])
-            except Exception:
+            t = parse_time(parts[0])
+            if t is None:
                 continue
 
             # Preferred path: already-converted 9-int format.
@@ -187,7 +198,30 @@ def build_graph(
     if n == 0:
         return None
     if n > max_nodes:
-        return None
+        # Keep graph buildable instead of dropping the entire window.
+        # Deterministically cap unique nodes while scanning events so that
+        # early valid communication rows are retained.
+        capped_node_ids: Dict[int, int] = {}
+        capped_rows: List[Tuple[int, int, int, int, int, int, int, int, int]] = []
+        for row in rows:
+            s = row[1]
+            d = row[4]
+            if s not in capped_node_ids:
+                if len(capped_node_ids) >= max_nodes:
+                    continue
+                capped_node_ids[s] = len(capped_node_ids)
+            if d not in capped_node_ids:
+                if len(capped_node_ids) >= max_nodes:
+                    continue
+                capped_node_ids[d] = len(capped_node_ids)
+            capped_rows.append(row)
+
+        if not capped_rows:
+            return None
+
+        rows = capped_rows
+        node_ids = capped_node_ids
+        n = len(node_ids)
 
     deg_in = torch.zeros(n)
     deg_out = torch.zeros(n)
@@ -617,6 +651,8 @@ def main() -> None:
         total_edges_after = 0.0
         total_masked_fraction = 0.0
         seen = 0
+        empty_rows = 0
+        dropped_windows = 0
 
         for wstart, rows in windows_from_stream(parse_csv_9ints_stream(path), window_size=args.window_size):
             raw_rows = rows
@@ -633,6 +669,9 @@ def main() -> None:
 
             g = build_graph(raw_rows, window_start=wstart, max_nodes=args.max_nodes)
             if g is None:
+                dropped_windows += 1
+                if not raw_rows:
+                    empty_rows += 1
                 continue
             if args.corruption_type in {"node_features", "edges"}:
                 g, c_stats = apply_graph_corruption(g, args.corruption_type, args.corruption_rate, args.node_mask_mode, rng)
@@ -648,6 +687,10 @@ def main() -> None:
                 print(f"loading {tag} windows seen {seen} graphs kept {len(out)}", flush=True)
 
         print(f"[OK] {tag} graphs kept: {len(out)}", flush=True)
+        print(
+            f"[INFO] {tag} windows seen={seen} dropped={dropped_windows} empty_rows={empty_rows}",
+            flush=True,
+        )
         if args.corruption_type == "temporal":
             print(f"[INFO] {tag} events before={total_events_before} after={total_events_after}", flush=True)
         if args.corruption_type == "edges":
