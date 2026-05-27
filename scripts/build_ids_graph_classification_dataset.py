@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,9 @@ REQUIRED_EDGE_FEATURES = [
     "L4_DST_PORT",
     "TCP_FLAGS",
 ]
+
+CHUNK_SIZE = 5000
+MAX_ROWS = 10000
 
 
 @dataclass
@@ -181,49 +185,37 @@ def build_window_graph(
     )
 
 
-def main() -> None:
-    # Hardcoded paths/config per request.
-    input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
-    output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph"
-    window_seconds = 300
-    max_rows = None
+def save_graph_npz(sample: GraphSample, out_dir: Path) -> None:
+    np.savez_compressed(
+        out_dir / f"graph_{sample.graph_id:06d}.npz",
+        node_features=sample.node_features,
+        edge_index=sample.edge_index,
+        edge_features=sample.edge_features,
+        label=np.array([sample.graph_label], dtype=np.int64),
+        attack_type=np.array([sample.attack_type], dtype=np.str_),
+    )
 
-    out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
-    df = pd.read_csv(input_csv, nrows=max_rows)
-    cols = list(df.columns)
-    time_col = find_col(cols, TIME_CANDIDATES)
-    src_col = find_col(cols, SRC_IP_CANDIDATES)
-    dst_col = find_col(cols, DST_IP_CANDIDATES)
-    label_col = find_col(cols, LABEL_CANDIDATES)
-    proto_col = find_col(cols, PROTO_CANDIDATES)
-    attack_type_col = find_col(cols, ATTACK_TYPE_CANDIDATES)
-
-    missing = [name for name, c in [("time", time_col), ("src_ip", src_col), ("dst_ip", dst_col), ("label", label_col), ("protocol", proto_col)] if c is None]
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}. Available columns: {cols}")
-
-    missing_edge_cols = [c for c in REQUIRED_EDGE_FEATURES if c not in df.columns]
-    if missing_edge_cols:
-        raise ValueError(f"Missing required edge feature columns: {missing_edge_cols}")
-
-    df["__time"] = pd.to_datetime(pd.to_numeric(df[time_col], errors="coerce"), unit="ms", errors="coerce", utc=True)
-    df = df.dropna(subset=["__time", src_col, dst_col]).sort_values("__time").reset_index(drop=True)
-
-    edge_feat_cols = REQUIRED_EDGE_FEATURES.copy()
-    for c in edge_feat_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
-
-    epoch = (df["__time"].astype("int64") // 10**9).astype(np.int64)
-    df["__window"] = (epoch // window_seconds).astype(np.int64)
-
-    graphs: List[GraphSample] = []
-    summary = []
-    for gid, (_, gdf) in enumerate(df.groupby("__window", sort=True)):
-        sample = build_window_graph(gdf, gid, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
-        graphs.append(sample)
-        summary.append(
+def append_summary_row(summary_path: Path, sample: GraphSample) -> None:
+    write_header = not summary_path.exists()
+    with summary_path.open("a", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "graph_id",
+                "start_time",
+                "end_time",
+                "num_nodes",
+                "num_edges",
+                "num_benign_flows",
+                "num_attack_flows",
+                "graph_label",
+                "attack_type",
+            ],
+        )
+        if write_header:
+            writer.writeheader()
+        writer.writerow(
             {
                 "graph_id": sample.graph_id,
                 "start_time": sample.start_time.isoformat(),
@@ -237,20 +229,124 @@ def main() -> None:
             }
         )
 
-    np.save(out_dir / "graphs.npy", np.array(graphs, dtype=object), allow_pickle=True)
-    pd.DataFrame(summary).to_csv(out_dir / "graph_window_summary.csv", index=False)
+
+def normalize_chunk(
+    chunk: pd.DataFrame,
+    time_col: str,
+    src_col: str,
+    dst_col: str,
+    edge_feat_cols: List[str],
+    window_seconds: int,
+) -> pd.DataFrame:
+    df = chunk.copy()
+    df["__time"] = pd.to_datetime(pd.to_numeric(df[time_col], errors="coerce"), unit="ms", errors="coerce", utc=True)
+    df = df.dropna(subset=["__time", src_col, dst_col]).sort_values("__time").reset_index(drop=True)
+    for c in edge_feat_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    epoch = (df["__time"].astype("int64") // 10**9).astype(np.int64)
+    df["__window"] = (epoch // window_seconds).astype(np.int64)
+    return df
+
+
+def main() -> None:
+    input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
+    output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph"
+    window_seconds = 300
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = out_dir / "graph_window_summary.csv"
+    if summary_path.exists():
+        summary_path.unlink()
+
+    header_df = pd.read_csv(input_csv, nrows=1)
+    cols = list(header_df.columns)
+    time_col = find_col(cols, TIME_CANDIDATES)
+    src_col = find_col(cols, SRC_IP_CANDIDATES)
+    dst_col = find_col(cols, DST_IP_CANDIDATES)
+    label_col = find_col(cols, LABEL_CANDIDATES)
+    proto_col = find_col(cols, PROTO_CANDIDATES)
+    attack_type_col = find_col(cols, ATTACK_TYPE_CANDIDATES)
+
+    missing = [name for name, c in [("time", time_col), ("src_ip", src_col), ("dst_ip", dst_col), ("label", label_col), ("protocol", proto_col)] if c is None]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}. Available columns: {cols}")
+
+    missing_edge_cols = [c for c in REQUIRED_EDGE_FEATURES if c not in cols]
+    if missing_edge_cols:
+        raise ValueError(f"Missing required edge feature columns: {missing_edge_cols}")
+
+    edge_feat_cols = REQUIRED_EDGE_FEATURES.copy()
+    carry_window_df = pd.DataFrame()
+    total_rows_read = 0
+    graph_count = 0
+
+    chunk_iter = pd.read_csv(input_csv, chunksize=CHUNK_SIZE)
+
+    try:
+        for chunk_idx, chunk in enumerate(chunk_iter, start=1):
+            if MAX_ROWS is not None:
+                remaining = MAX_ROWS - total_rows_read
+                if remaining <= 0:
+                    break
+                if len(chunk) > remaining:
+                    chunk = chunk.iloc[:remaining].copy()
+
+            total_rows_read += len(chunk)
+            if total_rows_read % 5000 == 0:
+                print(f"processed {total_rows_read} rows (chunk {chunk_idx})")
+
+            cleaned_chunk = normalize_chunk(chunk, time_col, src_col, dst_col, edge_feat_cols, window_seconds)
+            if cleaned_chunk.empty and carry_window_df.empty:
+                continue
+
+            current_df = pd.concat([carry_window_df, cleaned_chunk], ignore_index=True)
+            if current_df.empty:
+                continue
+
+            windows = current_df["__window"].to_numpy()
+            last_window = windows[-1]
+            complete_mask = windows != last_window
+            complete_df = current_df.loc[complete_mask]
+            carry_window_df = current_df.loc[~complete_mask].copy()
+
+            if not complete_df.empty:
+                for _, gdf in complete_df.groupby("__window", sort=True):
+                    sample = build_window_graph(gdf, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
+                    save_graph_npz(sample, out_dir)
+                    append_summary_row(summary_path, sample)
+                    graph_count += 1
+
+            if MAX_ROWS is not None and total_rows_read >= MAX_ROWS:
+                break
+
+        if not carry_window_df.empty:
+            sample = build_window_graph(carry_window_df, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
+            save_graph_npz(sample, out_dir)
+            append_summary_row(summary_path, sample)
+            graph_count += 1
+
+    except Exception as exc:
+        print(
+            f"ERROR while processing chunk {chunk_idx} at total_rows={total_rows_read}: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        raise
+
     with open(out_dir / "metadata.json", "w") as f:
         json.dump(
             {
                 "edge_feature_columns": edge_feat_cols,
-                "num_graphs": len(graphs),
+                "num_graphs": graph_count,
                 "input_csv": input_csv,
                 "window_seconds": window_seconds,
+                "chunk_size": CHUNK_SIZE,
+                "max_rows": MAX_ROWS,
             },
             f,
             indent=2,
         )
-    print(f"wrote {len(graphs)} graph samples to {out_dir}")
+    print(f"wrote {graph_count} graph samples to {out_dir}")
 
 
 if __name__ == "__main__":
