@@ -546,6 +546,16 @@ def compute_metrics(y_true: np.ndarray, y_score: np.ndarray, threshold: float = 
     }
 
 
+def summarize_metrics(metrics_list: List[dict]) -> dict:
+    metric_names = ["accuracy", "precision", "recall", "f1", "auroc", "auprc"]
+    summary = {}
+    for name in metric_names:
+        values = np.array([m[name] for m in metrics_list], dtype=np.float64)
+        summary[f"{name}_mean"] = float(np.nanmean(values))
+        summary[f"{name}_std"] = float(np.nanstd(values))
+    return summary
+
+
 def train_svm_baseline(train_graphs: List[GraphWindow], test_graphs: List[GraphWindow]) -> np.ndarray:
     x_train = np.stack([graph_to_summary_vector(g) for g in train_graphs])
     y_train = np.array([g.label for g in train_graphs], dtype=np.int64)
@@ -647,12 +657,8 @@ def main() -> None:
     MAX_GRAPHS = 0
 
     MAX_NODES = 50000
-    SEED = 42
+    SEEDS = [42, 43, 44, 45, 46]
     STANDARDIZE = True
-
-    torch.manual_seed(SEED)
-    np.random.seed(SEED)
-    random.seed(SEED)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[OK] device: {device}", flush=True)
@@ -667,108 +673,95 @@ def main() -> None:
         max_nodes=MAX_NODES,
     )
 
-    train_graphs, val_graphs, test_graphs = split_for_all_models(
-        graphs=graphs,
-        seed=SEED,
-        train_ratio=TRAIN_RATIO,
-        val_ratio=VAL_RATIO,
-        benign_limit=benign_limit,
-        mal_limit=mal_limit,
-    )
-
-    if STANDARDIZE:
-        standardize_from_train(train_graphs, train_graphs + val_graphs + test_graphs)
-
-    in_dim = train_graphs[0].x.shape[1]
-    y_test = np.array([g.label for g in test_graphs], dtype=np.int64)
-
     print(f"[OK] graph dir: {GRAPH_DIR}", flush=True)
     print(f"[OK] total graphs loaded: {len(graphs)}", flush=True)
-    print(f"[OK] train graphs: {len(train_graphs)}", flush=True)
-    print(f"[OK] val graphs: {len(val_graphs)}", flush=True)
-    print(f"[OK] test graphs: {len(test_graphs)}", flush=True)
-    print(f"[OK] train benign graphs: {sum(g.label == 0 for g in train_graphs)}", flush=True)
-    print(f"[OK] train malicious graphs: {sum(g.label == 1 for g in train_graphs)}", flush=True)
-    print(f"[OK] test benign graphs: {sum(g.label == 0 for g in test_graphs)}", flush=True)
-    print(f"[OK] test malicious graphs: {sum(g.label == 1 for g in test_graphs)}", flush=True)
-    print(f"[OK] node feature dim: {in_dim}", flush=True)
 
     rows = []
     details = {}
+    per_model_metrics = {"svm": [], "gnn": [], "topogcl": []}
+    split_info = {}
+    labels_info = {}
 
-    print("\n[RUN] SVM baseline", flush=True)
-    svm_scores = train_svm_baseline(train_graphs, test_graphs)
-    svm_metrics = compute_metrics(y_test, svm_scores, threshold=0.5)
-    rows.append({"model": "svm", **svm_metrics})
-    details["svm"] = {
-        "metrics": svm_metrics,
-        "threshold": 0.5,
-        "score_type": "probability_malicious",
-    }
+    for seed in SEEDS:
+        print(f"\n[RUN] seed={seed}", flush=True)
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
 
-    print("\n[RUN] supervised GNN baseline", flush=True)
-    gnn_scores = train_supervised_gnn(
-        train_graphs=train_graphs,
-        test_graphs=test_graphs,
-        in_dim=in_dim,
-        hidden_dim=HIDDEN_DIM,
-        epochs=EPOCHS_GNN,
-        lr=LR_GNN,
-        seed=SEED,
-        device=device,
-    )
-    gnn_metrics = compute_metrics(y_test, gnn_scores, threshold=0.5)
-    rows.append({"model": "gnn", **gnn_metrics})
-    details["gnn"] = {
-        "metrics": gnn_metrics,
-        "threshold": 0.5,
-        "score_type": "probability_malicious",
-    }
+        train_graphs, val_graphs, test_graphs = split_for_all_models(
+            graphs=graphs,
+            seed=seed,
+            train_ratio=TRAIN_RATIO,
+            val_ratio=VAL_RATIO,
+            benign_limit=benign_limit,
+            mal_limit=mal_limit,
+        )
 
-    print("\n[RUN] TopoGCL", flush=True)
-    topogcl_scores, topogcl_threshold = train_topogcl_scores(
-        train_graphs=train_graphs,
-        test_graphs=test_graphs,
-        in_dim=in_dim,
-        hidden_dim=HIDDEN_DIM,
-        emb_dim=EMB_DIM,
-        epochs=EPOCHS_TOPOGCL,
-        lr=LR_TOPOGCL,
-        edge_drop=EDGE_DROP,
-        feat_mask=FEAT_MASK,
-        tau=TAU,
-        batch_size=BATCH_SIZE,
-        threshold_q=THRESHOLD_Q,
-        seed=SEED,
-        device=device,
-    )
-    topogcl_metrics = compute_metrics(y_test, topogcl_scores, threshold=topogcl_threshold)
-    rows.append({"model": "topogcl", **topogcl_metrics})
-    details["topogcl"] = {
-        "metrics": topogcl_metrics,
-        "threshold": topogcl_threshold,
-        "threshold_q": THRESHOLD_Q,
-        "score_type": "distance_from_benign_center",
-    }
+        if STANDARDIZE:
+            standardize_from_train(train_graphs, train_graphs + val_graphs + test_graphs)
+
+        in_dim = train_graphs[0].x.shape[1]
+        y_test = np.array([g.label for g in test_graphs], dtype=np.int64)
+
+        if not split_info:
+            split_info = {
+                "train": len(train_graphs),
+                "val": len(val_graphs),
+                "test": len(test_graphs),
+                "train_ratio": TRAIN_RATIO,
+                "val_ratio": VAL_RATIO,
+            }
+            labels_info = {
+                "train_benign": int(sum(g.label == 0 for g in train_graphs)),
+                "train_malicious": int(sum(g.label == 1 for g in train_graphs)),
+                "test_benign": int(sum(g.label == 0 for g in test_graphs)),
+                "test_malicious": int(sum(g.label == 1 for g in test_graphs)),
+            }
+
+        per_model_metrics["svm"].append(compute_metrics(y_test, train_svm_baseline(train_graphs, test_graphs), threshold=0.5))
+
+        gnn_scores = train_supervised_gnn(
+            train_graphs=train_graphs,
+            test_graphs=test_graphs,
+            in_dim=in_dim,
+            hidden_dim=HIDDEN_DIM,
+            epochs=EPOCHS_GNN,
+            lr=LR_GNN,
+            seed=seed,
+            device=device,
+        )
+        per_model_metrics["gnn"].append(compute_metrics(y_test, gnn_scores, threshold=0.5))
+
+        topogcl_scores, topogcl_threshold = train_topogcl_scores(
+            train_graphs=train_graphs,
+            test_graphs=test_graphs,
+            in_dim=in_dim,
+            hidden_dim=HIDDEN_DIM,
+            emb_dim=EMB_DIM,
+            epochs=EPOCHS_TOPOGCL,
+            lr=LR_TOPOGCL,
+            edge_drop=EDGE_DROP,
+            feat_mask=FEAT_MASK,
+            tau=TAU,
+            batch_size=BATCH_SIZE,
+            threshold_q=THRESHOLD_Q,
+            seed=seed,
+            device=device,
+        )
+        per_model_metrics["topogcl"].append(compute_metrics(y_test, topogcl_scores, threshold=topogcl_threshold))
+
+    for model_name, metrics_list in per_model_metrics.items():
+        summary = summarize_metrics(metrics_list)
+        rows.append({"model": model_name, **summary})
+        details[model_name] = {"runs": metrics_list, "summary": summary}
 
     results = {
         "dataset": "NF-BoT-IoT",
         "graph_dir": str(GRAPH_DIR),
         "device": str(device),
         "num_graphs_loaded": len(graphs),
-        "split": {
-            "train": len(train_graphs),
-            "val": len(val_graphs),
-            "test": len(test_graphs),
-            "train_ratio": TRAIN_RATIO,
-            "val_ratio": VAL_RATIO,
-        },
-        "labels": {
-            "train_benign": int(sum(g.label == 0 for g in train_graphs)),
-            "train_malicious": int(sum(g.label == 1 for g in train_graphs)),
-            "test_benign": int(sum(g.label == 0 for g in test_graphs)),
-            "test_malicious": int(sum(g.label == 1 for g in test_graphs)),
-        },
+        "split": split_info,
+        "labels": labels_info,
         "training": {
             "epochs_topogcl": EPOCHS_TOPOGCL,
             "epochs_gnn": EPOCHS_GNN,
@@ -782,7 +775,7 @@ def main() -> None:
             "batch_size": BATCH_SIZE,
             "threshold_q": THRESHOLD_Q,
             "standardized": STANDARDIZE,
-            "seed": SEED,
+            "seeds": SEEDS,
             "benign_limit": BENIGN_LIMIT,
             "mal_limit": MAL_LIMIT,
             "max_graphs": MAX_GRAPHS,
@@ -798,7 +791,7 @@ def main() -> None:
         json.dump(results, f, indent=2)
 
     with OUT_CSV.open("w", newline="") as f:
-        fieldnames = ["model", "accuracy", "precision", "recall", "f1", "auroc", "auprc"]
+        fieldnames = ["model", "accuracy_mean", "accuracy_std", "precision_mean", "precision_std", "recall_mean", "recall_std", "f1_mean", "f1_std", "auroc_mean", "auroc_std", "auprc_mean", "auprc_std"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
