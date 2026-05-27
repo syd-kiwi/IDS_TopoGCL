@@ -55,7 +55,7 @@ FIXED_NODE_FEATURES = [
 ]
 
 MAX_ROWS = 100000
-CHUNK_SIZE = 5000
+CHUNK_SIZE = 1000
 
 
 @dataclass
@@ -266,7 +266,7 @@ def normalize_chunk(
 def main() -> None:
     input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
     output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph_fixed"
-    window_seconds = 30
+    window_seconds = 15
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
