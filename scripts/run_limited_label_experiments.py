@@ -180,12 +180,15 @@ def main():
 
     summary_rows = []
     fairness_records = []
+    model_label_usage_records = []
     for ratio in LABEL_RATIOS:
         nb = max(1, int(math.floor(ratio * len(b_train))))
         nm = max(1, int(math.floor(ratio * len(m_train))))
         b_sel, m_sel = idx_b[:nb], idx_m[:nm]
-        fairness_records.append({"label_ratio": ratio, "labeled_benign": int(nb), "labeled_malicious": int(nm)})
-        print(f"label_ratio={ratio:.2f} labeled_benign={nb} labeled_malicious={nm}")
+        fairness_records.append({"label_ratio": ratio, "labeled_benign": int(nb), "labeled_malicious": int(nm),
+                                 "benign_indices": [int(i) for i in b_sel.tolist()],
+                                 "malicious_indices": [int(i) for i in m_sel.tolist()]})
+        print(f"[shared_subset] label_ratio={ratio:.2f} labeled_benign={nb} labeled_malicious={nm}")
 
         train_graphs = [b_train[i] for i in b_sel] + [m_train[i] for i in m_sel]
         y_train = np.array([0] * len(b_sel) + [1] * len(m_sel))
@@ -193,6 +196,8 @@ def main():
         y_val = np.array([0] * len(b_val) + [1] * len(m_val))
         test_graphs = b_test + m_test
         y_test = np.array([0] * len(b_test) + [1] * len(m_test))
+
+        shared_subset_signature = {"benign_indices": [int(i) for i in b_sel.tolist()], "malicious_indices": [int(i) for i in m_sel.tolist()]}
 
         # SVM
         x_train = np.stack([graph_to_vector(g) for g in train_graphs])
@@ -212,6 +217,8 @@ def main():
         out = os.path.join(OUTPUT_DIR, f"svm_label_{ratio:.2f}.json")
         json.dump(res, open(out, "w"), indent=2)
         summary_rows.append(res)
+        model_label_usage_records.append({"label_ratio": ratio, "model": "svm", "labeled_benign": int(nb), "labeled_malicious": int(nm), **shared_subset_signature})
+        print(f"[svm] label_ratio={ratio:.2f} labeled_benign={nb} labeled_malicious={nm}")
 
         # GNN supervised
         enc = GCN(); clf = torch.nn.Linear(16, 1)
@@ -234,9 +241,11 @@ def main():
         out = os.path.join(OUTPUT_DIR, f"gnn_label_{ratio:.2f}.json")
         json.dump(res, open(out, "w"), indent=2)
         summary_rows.append(res)
+        model_label_usage_records.append({"label_ratio": ratio, "model": "gnn", "labeled_benign": int(nb), "labeled_malicious": int(nm), **shared_subset_signature})
+        print(f"[gnn] label_ratio={ratio:.2f} labeled_benign={nb} labeled_malicious={nm}")
 
         # TopoGCL: unlabeled pretraining + downstream classifier on labeled subset
-        enc = GCN(); pre_epochs = 10
+        enc = GCN(); pre_epochs = 30
         opt = torch.optim.Adam(enc.parameters(), lr=1e-3)
         unlabeled = b_train + m_train
         for _ in range(pre_epochs):
@@ -269,8 +278,25 @@ def main():
         out = os.path.join(OUTPUT_DIR, f"topogcl_label_{ratio:.2f}.json")
         json.dump(res, open(out, "w"), indent=2)
         summary_rows.append(res)
+        model_label_usage_records.append({"label_ratio": ratio, "model": "topogcl", "labeled_benign": int(nb), "labeled_malicious": int(nm), **shared_subset_signature})
+        print(f"[topogcl] label_ratio={ratio:.2f} labeled_benign={nb} labeled_malicious={nm}")
 
     json.dump(fairness_records, open(os.path.join(OUTPUT_DIR, "fairness_label_counts.json"), "w"), indent=2)
+    json.dump(model_label_usage_records, open(os.path.join(OUTPUT_DIR, "model_label_usage.json"), "w"), indent=2)
+
+    with open(os.path.join(OUTPUT_DIR, "model_label_usage.csv"), "w", newline="") as f:
+        fields = ["label_ratio", "model", "labeled_benign", "labeled_malicious"]
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for r in model_label_usage_records:
+            w.writerow({k: r[k] for k in fields})
+
+    for ratio in LABEL_RATIOS:
+        ratio_rows = [r for r in model_label_usage_records if r["label_ratio"] == ratio]
+        signatures = {(tuple(r["benign_indices"]), tuple(r["malicious_indices"])) for r in ratio_rows}
+        if len(signatures) != 1:
+            raise RuntimeError(f"Mismatch in labeled subset across models for ratio={ratio:.2f}")
+
 
     fields = ["dataset", "model", "label_ratio", "f1", "AUROC", "AUPRC", "recall_at_5_percent_fpr", "accuracy", "precision", "recall"]
     with open(os.path.join(OUTPUT_DIR, "limited_label_summary.csv"), "w", newline="") as f:
