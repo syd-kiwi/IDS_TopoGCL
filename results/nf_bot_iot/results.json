@@ -1,0 +1,77 @@
+{
+  "dataset": "NF-BoT-IoT",
+  "graph_dir": "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph",
+  "device": "cpu",
+  "num_graphs_loaded": 333,
+  "split": {
+    "train": 33,
+    "val": 50,
+    "test": 250,
+    "train_ratio": 0.1,
+    "val_ratio": 0.15
+  },
+  "labels": {
+    "train_benign": 31,
+    "train_malicious": 2,
+    "test_benign": 231,
+    "test_malicious": 19
+  },
+  "training": {
+    "epochs_topogcl": 100,
+    "epochs_gnn": 1,
+    "lr_topogcl": 0.001,
+    "lr_gnn": 0.001,
+    "hidden_dim": 64,
+    "emb_dim": 32,
+    "edge_drop": 0.2,
+    "feat_mask": 0.2,
+    "tau": 0.2,
+    "batch_size": 16,
+    "threshold_q": 0.99,
+    "standardized": true,
+    "seed": 42,
+    "benign_limit": 0,
+    "mal_limit": 0,
+    "max_graphs": 0,
+    "max_nodes": 50000
+  },
+  "models": {
+    "svm": {
+      "metrics": {
+        "accuracy": 0.936,
+        "precision": 0.5555555555555556,
+        "recall": 0.7894736842105263,
+        "f1": 0.6521739130434783,
+        "auroc": 0.94896331738437,
+        "auprc": 0.8214000721124929
+      },
+      "threshold": 0.5,
+      "score_type": "probability_malicious"
+    },
+    "gnn": {
+      "metrics": {
+        "accuracy": 0.924,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "auroc": 0.7140578719526087,
+        "auprc": 0.3841306033602662
+      },
+      "threshold": 0.5,
+      "score_type": "probability_malicious"
+    },
+    "topogcl": {
+      "metrics": {
+        "accuracy": 0.952,
+        "precision": 0.7333333333333333,
+        "recall": 0.5789473684210527,
+        "f1": 0.6470588235294118,
+        "auroc": 0.9040783777625884,
+        "auprc": 0.6860901185702115
+      },
+      "threshold": 2.133413553237915,
+      "threshold_q": 0.99,
+      "score_type": "distance_from_benign_center"
+    }
+  }
+}
