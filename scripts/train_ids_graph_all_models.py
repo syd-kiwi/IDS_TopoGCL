@@ -620,15 +620,15 @@ def main() -> None:
     # Hardcoded configuration
     # Change values here only if needed.
     # =========================================================
-    GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph")
-    #GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph")
+    #GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph")
+    GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph")
 
 
-    OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/results.json")
-    OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/summary.csv")
+    #OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/results2.json")
+    #OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/summary2.csv")
 
-    #OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/results.json")
-    #OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/summary.csv")
+    OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/results.json")
+    OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/summary.csv")
 
     EPOCHS_TOPOGCL = 100
     EPOCHS_GNN = 1
