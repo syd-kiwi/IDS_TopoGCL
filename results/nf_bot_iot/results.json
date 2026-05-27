@@ -38,12 +38,12 @@
   "models": {
     "svm": {
       "metrics": {
-        "accuracy": 0.936,
-        "precision": 0.5555555555555556,
-        "recall": 0.7894736842105263,
-        "f1": 0.6521739130434783,
-        "auroc": 0.94896331738437,
-        "auprc": 0.8214000721124929
+        "accuracy": 0.94,
+        "precision": 1.0,
+        "recall": 0.21052631578947367,
+        "f1": 0.34782608695652173,
+        "auroc": 0.9564821143768513,
+        "auprc": 0.9118187012923851
       },
       "threshold": 0.5,
       "score_type": "probability_malicious"

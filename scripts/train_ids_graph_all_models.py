@@ -552,7 +552,7 @@ def train_svm_baseline(train_graphs: List[GraphWindow], test_graphs: List[GraphW
 
     x_test = np.stack([graph_to_summary_vector(g) for g in test_graphs])
 
-    svm = SVC(kernel="rbf", probability=True, random_state=42)
+    svm = SVC(kernel="linear", probability=True, random_state=42)
     svm.fit(x_train, y_train)
 
     return svm.predict_proba(x_test)[:, 1]
@@ -610,15 +610,15 @@ def main() -> None:
     # Hardcoded configuration
     # Change values here only if needed.
     # =========================================================
-    #GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph")
-    GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph")
+    GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph")
+    #GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph")
 
 
-    #OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/results.json")
-    #OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iotsummary.csv")
+    OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/results.json")
+    OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/summary.csv")
 
-    OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/results.json")
-    OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/summary.csv")
+    #OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/results.json")
+    #OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/summary.csv")
 
     EPOCHS_TOPOGCL = 100
     EPOCHS_GNN = 1
