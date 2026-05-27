@@ -245,7 +245,7 @@ def main():
         print(f"[gnn] label_ratio={ratio:.2f} labeled_benign={nb} labeled_malicious={nm}")
 
         # TopoGCL: unlabeled pretraining + downstream classifier on labeled subset
-        enc = GCN(); pre_epochs = 10
+        enc = GCN(); pre_epochs = 30
         opt = torch.optim.Adam(enc.parameters(), lr=1e-3)
         unlabeled = b_train + m_train
         for _ in range(pre_epochs):
