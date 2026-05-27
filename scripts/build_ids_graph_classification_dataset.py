@@ -43,6 +43,16 @@ REQUIRED_EDGE_FEATURES = [
     "L4_DST_PORT",
     "TCP_FLAGS",
 ]
+FIXED_NODE_FEATURES = [
+    "in_degree",
+    "out_degree",
+    "total_in_bytes",
+    "total_out_bytes",
+    "total_in_packets",
+    "total_out_packets",
+    "mean_flow_duration",
+    "total_flow_count",
+]
 
 CHUNK_SIZE = 5000
 MAX_ROWS = 10000
@@ -135,15 +145,6 @@ def build_window_graph(
     nonzero = node_flow_count > 0
     mean_flow_duration[nonzero] /= node_flow_count[nonzero]
 
-    proto_vals = _numeric(dfw, proto_col).astype(np.int64)
-    unique_proto = sorted({int(v) for v in proto_vals})
-    proto_to_col = {p: i for i, p in enumerate(unique_proto)}
-    proto_counts = np.zeros((n, len(unique_proto)), dtype=np.float32)
-    for edge_i, p in enumerate(proto_vals):
-        col_i = proto_to_col[int(p)]
-        proto_counts[src_idx[edge_i], col_i] += 1.0
-        proto_counts[dst_idx[edge_i], col_i] += 1.0
-
     node_features = np.concatenate(
         [
             deg_in[:, None],
@@ -153,7 +154,7 @@ def build_window_graph(
             total_in_packets[:, None],
             total_out_packets[:, None],
             mean_flow_duration[:, None],
-            proto_counts,
+            node_flow_count[:, None],
         ],
         axis=1,
     ).astype(np.float32)
@@ -183,6 +184,20 @@ def build_window_graph(
         num_benign_flows=num_benign,
         num_attack_flows=num_attack,
     )
+
+
+def assert_graph_shapes(sample: GraphSample) -> None:
+    if sample.node_features.shape[1] != 8 or sample.edge_features.shape[1] != 9 or sample.edge_index.shape[0] != 2:
+        print(
+            f"graph_id={sample.graph_id} "
+            f"node_features.shape={sample.node_features.shape} "
+            f"edge_features.shape={sample.edge_features.shape} "
+            f"edge_index.shape={sample.edge_index.shape}",
+            flush=True,
+        )
+        assert sample.node_features.shape[1] == 8
+        assert sample.edge_features.shape[1] == 9
+        assert sample.edge_index.shape[0] == 2
 
 
 def save_graph_npz(sample: GraphSample, out_dir: Path) -> None:
@@ -250,7 +265,7 @@ def normalize_chunk(
 
 def main() -> None:
     input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
-    output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph"
+    output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph_fixed"
     window_seconds = 300
 
     out_dir = Path(output_dir)
@@ -313,6 +328,7 @@ def main() -> None:
             if not complete_df.empty:
                 for _, gdf in complete_df.groupby("__window", sort=True):
                     sample = build_window_graph(gdf, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
+                    assert_graph_shapes(sample)
                     save_graph_npz(sample, out_dir)
                     append_summary_row(summary_path, sample)
                     graph_count += 1
@@ -322,6 +338,7 @@ def main() -> None:
 
         if not carry_window_df.empty:
             sample = build_window_graph(carry_window_df, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
+            assert_graph_shapes(sample)
             save_graph_npz(sample, out_dir)
             append_summary_row(summary_path, sample)
             graph_count += 1
@@ -336,6 +353,7 @@ def main() -> None:
     with open(out_dir / "metadata.json", "w") as f:
         json.dump(
             {
+                "node_feature_columns": FIXED_NODE_FEATURES,
                 "edge_feature_columns": edge_feat_cols,
                 "num_graphs": graph_count,
                 "input_csv": input_csv,
