@@ -1,21 +1,21 @@
-# IDS_TopoGCL (Focused Study: Clean vs Missing Edges)
+# IDS_TopoGCL
 
-This repository is now focused on exactly three research questions:
+This folder contains a compact, reproducible workflow for graph-based intrusion detection experiments using the `NF-BoT-IoT` and `NF-ToN-IoT` datasets.
 
-1. Does **TopoGCL** outperform **SVM** and **GNN** under clean graph observations?
-2. Does TopoGCL maintain stronger detection performance when communication edges are removed?
-3. How does missing-edge rate affect the TopoGCL performance gap vs baselines?
+## Repository layout
 
-## What remains in scope
+- `scripts/build_ids_graph_classification_dataset.py`  
+  Builds graph classification datasets from tabular IDS data.
+- `scripts/train_ids_graph_all_models.py`  
+  Trains/evaluates graph-based models across the prepared datasets.
+- `requirements.txt`  
+  Python dependencies for dataset construction and training.
+- `results/`  
+  Experiment outputs (JSON metrics and summary CSVs), currently including:
+  - `results/nf_bot_iot/`
+  - `results/nf_ton_iot/`
 
-- `scripts/ids_topogcl_optc_baseline.py`, `scripts/ids_topogcl_lanl_baseline.py`
-- `scripts/ids_gnn_optc_baseline.py`, `scripts/ids_gnn_lanl_baseline.py`
-- `scripts/ids_svm_baseline.py` (new one-class SVM baseline)
-- `scripts/data_corruptions.py` (edge drop utilities)
-- `scripts/run_edge_removal_study.sh`
-- `scripts/summarize_edge_removal.py`
-
-## Setup
+## Quick start
 
 ```bash
 python -m venv .venv
@@ -23,27 +23,48 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-If datasets are LFS pointers, resolve them first:
+## 1) Build graph classification datasets
+
+Run the dataset builder script (use `--help` to see all options):
+
+```bash
+python scripts/build_ids_graph_classification_dataset.py --help
+```
+
+Typical usage:
+
+```bash
+python scripts/build_ids_graph_classification_dataset.py
+```
+
+## 2) Train and evaluate models
+
+Run the training/evaluation pipeline (use `--help` for available flags):
+
+```bash
+python scripts/train_ids_graph_all_models.py --help
+```
+
+Typical usage:
+
+```bash
+python scripts/train_ids_graph_all_models.py
+```
+
+## Outputs
+
+After running experiments, check:
+
+- `results/<dataset>/results.json` for detailed run metrics.
+- `results/<dataset>/summary.csv` for summarized performance tables.
+
+## Notes
+
+- If your datasets are tracked with Git LFS, run:
 
 ```bash
 git lfs install
 git lfs pull
 ```
 
-## Run the full study
-
-```bash
-bash scripts/run_edge_removal_study.sh
-python scripts/summarize_edge_removal.py
-```
-
-Outputs:
-- per-run JSONs: `results/edge_removal/*.json`
-- combined metrics: `results/edge_removal_summary.csv`
-- AUROC performance gaps: `results/edge_removal_gaps.csv`
-
-## Interpretation
-
-- **Q1 (clean):** inspect rows where `edge_drop_rate == 0.0` in `edge_removal_summary.csv`.
-- **Q2 (robustness):** compare methods as `edge_drop_rate` increases.
-- **Q3 (gap trend):** inspect `gap_topogcl_minus_gnn` and `gap_topogcl_minus_svm` in `edge_removal_gaps.csv`.
+- For reproducibility, keep Python/package versions consistent with `requirements.txt`.
