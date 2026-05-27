@@ -46,6 +46,18 @@ def parse_csv_9ints_stream(
             token_ids[tok] = v
         return v
 
+    def parse_time(token: str) -> Optional[int]:
+        t = token.strip()
+        if not t:
+            return None
+        try:
+            return int(t)
+        except Exception:
+            try:
+                return int(float(t))
+            except Exception:
+                return None
+
     with open(file_path, "r") as f:
         for line in f:
             line = line.strip()
@@ -54,9 +66,8 @@ def parse_csv_9ints_stream(
             parts = line.split(",")
             if len(parts) < 2:
                 continue
-            try:
-                t = int(parts[0])
-            except Exception:
+            t = parse_time(parts[0])
+            if t is None:
                 continue
 
             # Preferred path: already-converted 9-int format.
@@ -187,7 +198,23 @@ def build_graph(
     if n == 0:
         return None
     if n > max_nodes:
-        return None
+        # Keep graph buildable instead of dropping the entire window.
+        # Deterministically retain the first max_nodes node ids encountered
+        # and filter events that touch out-of-budget nodes.
+        kept_global_ids = set(list(node_ids.keys())[:max_nodes])
+        filtered_rows = [r for r in rows if r[1] in kept_global_ids and r[4] in kept_global_ids]
+        if not filtered_rows:
+            return None
+        rows = filtered_rows
+        node_ids = {}
+        for (_, s, _, _, d, *_rest) in rows:
+            if s not in node_ids:
+                node_ids[s] = len(node_ids)
+            if d not in node_ids:
+                node_ids[d] = len(node_ids)
+        n = len(node_ids)
+        if n == 0:
+            return None
 
     deg_in = torch.zeros(n)
     deg_out = torch.zeros(n)
