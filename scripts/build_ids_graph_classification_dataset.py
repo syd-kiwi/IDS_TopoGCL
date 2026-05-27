@@ -54,9 +54,13 @@ FIXED_NODE_FEATURES = [
     "total_flow_count",
 ]
 
-MIN_EDGES = 5
+BENIGN_MIN_EDGES = 1
+ATTACK_MIN_EDGES = 5
 MAX_EDGES = 3000
-MAX_ROWS = 200000
+MIN_BENIGN_GRAPHS = 100
+MIN_ATTACK_GRAPHS = 100
+MAX_BENIGN_GRAPHS = 200
+MAX_ATTACK_GRAPHS = 200
 CHUNK_SIZE = 500
 
 
@@ -279,8 +283,8 @@ def normalize_chunk(
 
 def main() -> None:
     input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
-    output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph_fixed"
-    window_seconds = 30
+    output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph_15s_balanced"
+    window_seconds = 15
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -309,21 +313,19 @@ def main() -> None:
     carry_window_df = pd.DataFrame()
     total_rows_read = 0
     graph_count = 0
+    benign_count = 0
+    attack_count = 0
 
     chunk_iter = pd.read_csv(input_csv, chunksize=CHUNK_SIZE)
 
     try:
         for chunk_idx, chunk in enumerate(chunk_iter, start=1):
-            if MAX_ROWS is not None:
-                remaining = MAX_ROWS - total_rows_read
-                if remaining <= 0:
-                    break
-                if len(chunk) > remaining:
-                    chunk = chunk.iloc[:remaining].copy()
-
             total_rows_read += len(chunk)
-            if total_rows_read % 5000 == 0:
-                print(f"processed {total_rows_read} rows (chunk {chunk_idx})")
+            if total_rows_read % 50000 == 0:
+                print(
+                    f"rows processed={total_rows_read} benign graphs found={benign_count} attack graphs found={attack_count}",
+                    flush=True,
+                )
 
             cleaned_chunk = normalize_chunk(chunk, time_col, src_col, dst_col, edge_feat_cols, window_seconds)
             if cleaned_chunk.empty and carry_window_df.empty:
@@ -342,33 +344,68 @@ def main() -> None:
             if not complete_df.empty:
                 for _, gdf in complete_df.groupby("__window", sort=True):
                     sample = build_window_graph(gdf, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
-                    sample = apply_edge_limits(sample, MIN_EDGES, MAX_EDGES)
+                    assert sample.graph_label == (1 if sample.num_attack_flows > 0 else 0)
+                    if sample.graph_label == 0 and sample.num_attack_flows != 0:
+                        continue
+                    if sample.graph_label == 1 and sample.num_attack_flows <= 0:
+                        continue
+
+                    min_edges = ATTACK_MIN_EDGES if sample.graph_label == 1 else BENIGN_MIN_EDGES
+                    sample = apply_edge_limits(sample, min_edges, MAX_EDGES)
                     if sample is None:
                         continue
+
+                    if sample.graph_label == 0:
+                        if benign_count >= MAX_BENIGN_GRAPHS:
+                            continue
+                    else:
+                        if attack_count >= MAX_ATTACK_GRAPHS:
+                            continue
+
                     assert_graph_shapes(sample)
                     save_graph_npz(sample, out_dir)
-                    assert sample.edge_index.shape[1] >= MIN_EDGES
+                    assert sample.edge_index.shape[1] >= min_edges
                     assert sample.edge_index.shape[1] <= MAX_EDGES
                     assert sample.node_features.shape[1] == 8
                     assert sample.edge_features.shape[1] == 9
                     append_summary_row(summary_path, sample)
                     graph_count += 1
+                    if sample.graph_label == 0:
+                        benign_count += 1
+                    else:
+                        attack_count += 1
 
-            if MAX_ROWS is not None and total_rows_read >= MAX_ROWS:
+            if (
+                benign_count >= MIN_BENIGN_GRAPHS
+                and attack_count >= MIN_ATTACK_GRAPHS
+                and benign_count <= MAX_BENIGN_GRAPHS
+                and attack_count <= MAX_ATTACK_GRAPHS
+            ):
                 break
 
         if not carry_window_df.empty:
             sample = build_window_graph(carry_window_df, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
-            sample = apply_edge_limits(sample, MIN_EDGES, MAX_EDGES)
-            if sample is not None:
-                assert_graph_shapes(sample)
-                save_graph_npz(sample, out_dir)
-                assert sample.edge_index.shape[1] >= MIN_EDGES
-                assert sample.edge_index.shape[1] <= MAX_EDGES
-                assert sample.node_features.shape[1] == 8
-                assert sample.edge_features.shape[1] == 9
-                append_summary_row(summary_path, sample)
-                graph_count += 1
+            assert sample.graph_label == (1 if sample.num_attack_flows > 0 else 0)
+            if (sample.graph_label == 0 and sample.num_attack_flows == 0) or (sample.graph_label == 1 and sample.num_attack_flows > 0):
+                min_edges = ATTACK_MIN_EDGES if sample.graph_label == 1 else BENIGN_MIN_EDGES
+                sample = apply_edge_limits(sample, min_edges, MAX_EDGES)
+                if sample is not None:
+                    can_save = (sample.graph_label == 0 and benign_count < MAX_BENIGN_GRAPHS) or (
+                        sample.graph_label == 1 and attack_count < MAX_ATTACK_GRAPHS
+                    )
+                    if can_save:
+                        assert_graph_shapes(sample)
+                        save_graph_npz(sample, out_dir)
+                        assert sample.edge_index.shape[1] >= min_edges
+                        assert sample.edge_index.shape[1] <= MAX_EDGES
+                        assert sample.node_features.shape[1] == 8
+                        assert sample.edge_features.shape[1] == 9
+                        append_summary_row(summary_path, sample)
+                        graph_count += 1
+                        if sample.graph_label == 0:
+                            benign_count += 1
+                        else:
+                            attack_count += 1
 
     except Exception as exc:
         print(
@@ -386,12 +423,17 @@ def main() -> None:
                 "input_csv": input_csv,
                 "window_seconds": window_seconds,
                 "chunk_size": CHUNK_SIZE,
-                "max_rows": MAX_ROWS,
+                "min_benign_graphs": MIN_BENIGN_GRAPHS,
+                "min_attack_graphs": MIN_ATTACK_GRAPHS,
+                "max_benign_graphs": MAX_BENIGN_GRAPHS,
+                "max_attack_graphs": MAX_ATTACK_GRAPHS,
+                "benign_min_edges": BENIGN_MIN_EDGES,
+                "attack_min_edges": ATTACK_MIN_EDGES,
             },
             f,
             indent=2,
         )
-    print(f"wrote {graph_count} graph samples to {out_dir}")
+    print(f"wrote {graph_count} graph samples to {out_dir} (benign={benign_count}, attack={attack_count})")
 
 
 if __name__ == "__main__":
