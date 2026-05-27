@@ -100,6 +100,64 @@
         "auprc_std": 0.3559826203291465
       }
     },
+    "xgboost": {
+      "runs": [
+        {
+          "accuracy": 0.924,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.076
+        },
+        {
+          "accuracy": 0.924,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.076
+        },
+        {
+          "accuracy": 0.924,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.076
+        },
+        {
+          "accuracy": 0.924,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.076
+        },
+        {
+          "accuracy": 0.924,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.076
+        }
+      ],
+      "summary": {
+        "accuracy_mean": 0.924,
+        "accuracy_std": 0.0,
+        "precision_mean": 0.0,
+        "precision_std": 0.0,
+        "recall_mean": 0.0,
+        "recall_std": 0.0,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "auroc_mean": 0.5,
+        "auroc_std": 0.0,
+        "auprc_mean": 0.076,
+        "auprc_std": 0.0
+      }
+    },
     "gnn": {
       "runs": [
         {

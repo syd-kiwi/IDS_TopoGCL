@@ -100,6 +100,64 @@
         "auprc_std": 0.014777824960202723
       }
     },
+    "xgboost": {
+      "runs": [
+        {
+          "accuracy": 0.915929203539823,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.084070796460177
+        },
+        {
+          "accuracy": 0.915929203539823,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.084070796460177
+        },
+        {
+          "accuracy": 0.915929203539823,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.084070796460177
+        },
+        {
+          "accuracy": 0.915929203539823,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.084070796460177
+        },
+        {
+          "accuracy": 0.915929203539823,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.084070796460177
+        }
+      ],
+      "summary": {
+        "accuracy_mean": 0.9159292035398231,
+        "accuracy_std": 1.1102230246251565e-16,
+        "precision_mean": 0.0,
+        "precision_std": 0.0,
+        "recall_mean": 0.0,
+        "recall_std": 0.0,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "auroc_mean": 0.5,
+        "auroc_std": 0.0,
+        "auprc_mean": 0.084070796460177,
+        "auprc_std": 0.0
+      }
+    },
     "gnn": {
       "runs": [
         {
