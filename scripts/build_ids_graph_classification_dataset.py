@@ -56,6 +56,8 @@ FIXED_NODE_FEATURES = [
 
 CHUNK_SIZE = 5000
 MAX_ROWS = 10000
+MIN_EDGES = 10
+MAX_EDGES = 3000
 
 
 @dataclass
@@ -200,6 +202,18 @@ def assert_graph_shapes(sample: GraphSample) -> None:
         assert sample.edge_index.shape[0] == 2
 
 
+def apply_edge_limits(sample: GraphSample, min_edges: int, max_edges: int) -> Optional[GraphSample]:
+    num_edges = sample.edge_index.shape[1]
+    if num_edges < min_edges:
+        return None
+    if num_edges > max_edges:
+        keep_idx = np.random.choice(num_edges, size=max_edges, replace=False)
+        keep_idx.sort()
+        sample.edge_index = sample.edge_index[:, keep_idx]
+        sample.edge_features = sample.edge_features[keep_idx]
+    return sample
+
+
 def save_graph_npz(sample: GraphSample, out_dir: Path) -> None:
     np.savez_compressed(
         out_dir / f"graph_{sample.graph_id:06d}.npz",
@@ -265,8 +279,8 @@ def normalize_chunk(
 
 def main() -> None:
     input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
-    output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph_fixed"
-    window_seconds = 300
+    output_dir = "datasets/NF-BoT-IoT/Graph_30s_100K_filtered"
+    window_seconds = 30
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -328,8 +342,15 @@ def main() -> None:
             if not complete_df.empty:
                 for _, gdf in complete_df.groupby("__window", sort=True):
                     sample = build_window_graph(gdf, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
+                    sample = apply_edge_limits(sample, MIN_EDGES, MAX_EDGES)
+                    if sample is None:
+                        continue
                     assert_graph_shapes(sample)
                     save_graph_npz(sample, out_dir)
+                    assert sample.edge_index.shape[1] >= MIN_EDGES
+                    assert sample.edge_index.shape[1] <= MAX_EDGES
+                    assert sample.node_features.shape[1] == 8
+                    assert sample.edge_features.shape[1] == 9
                     append_summary_row(summary_path, sample)
                     graph_count += 1
 
@@ -338,10 +359,16 @@ def main() -> None:
 
         if not carry_window_df.empty:
             sample = build_window_graph(carry_window_df, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
-            assert_graph_shapes(sample)
-            save_graph_npz(sample, out_dir)
-            append_summary_row(summary_path, sample)
-            graph_count += 1
+            sample = apply_edge_limits(sample, MIN_EDGES, MAX_EDGES)
+            if sample is not None:
+                assert_graph_shapes(sample)
+                save_graph_npz(sample, out_dir)
+                assert sample.edge_index.shape[1] >= MIN_EDGES
+                assert sample.edge_index.shape[1] <= MAX_EDGES
+                assert sample.node_features.shape[1] == 8
+                assert sample.edge_features.shape[1] == 9
+                append_summary_row(summary_path, sample)
+                graph_count += 1
 
     except Exception as exc:
         print(
