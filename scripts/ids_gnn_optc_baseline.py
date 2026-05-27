@@ -164,7 +164,7 @@ def compute_center(model: GCNEmbedder, graphs: Iterable[GraphWindow]) -> torch.T
         for g in graphs:
             embs.append(model(g.x, g.a_hat))
     if not embs:
-        return torch.zeros(model.w2.out_features)
+        return torch.zeros(model.w2.out_features, device=model.w2.weight.device)
     return torch.stack(embs, dim=0).mean(dim=0)
 
 
@@ -244,12 +244,12 @@ def main() -> None:
     parser.add_argument(
         "--auth_path",
         type=str,
-        default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/LANL/AUTH/auth_reformat.txt",
+        default="datasets/OPTC/auth_optc.txt",
     )
     parser.add_argument(
         "--red_path",
         type=str,
-        default="/home/kiwi-pandas/Documents/IDS_TopoGCL/data/LANL/REDTEAM/redteam_reformat.txt",
+        default="datasets/OPTC/redteam_optc.txt",
     )
     parser.add_argument("--window_size", type=int, default=1)
     parser.add_argument("--hidden_dim", type=int, default=32)
@@ -272,6 +272,8 @@ def main() -> None:
     )
     parser.add_argument("--scenario_rate", type=float, default=0.0)
     args = parser.parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[INFO] using device={device}", flush=True)
     torch.manual_seed(args.random_seed)
 
     if args.scenario != "none" and args.scenario_rate > 0:
@@ -292,6 +294,7 @@ def main() -> None:
         out: List[GraphWindow] = []
         last = -1
         for g in iter_graphs(path, limit=limit):
+            g = GraphWindow(x=g.x.to(device), a_hat=g.a_hat.to(device), num_nodes=g.num_nodes)
             out.append(g)
             if limit is not None and limit > 0:
                 p = int(100 * len(out) / limit)
@@ -306,7 +309,7 @@ def main() -> None:
         raise RuntimeError("Insufficient graphs parsed from inputs")
 
     in_dim = benign_graphs[0].x.shape[1]
-    model = GCNEmbedder(in_dim=in_dim, hidden_dim=args.hidden_dim, out_dim=args.emb_dim)
+    model = GCNEmbedder(in_dim=in_dim, hidden_dim=args.hidden_dim, out_dim=args.emb_dim).to(device)
 
     # Center from initial pass
     center = compute_center(model, benign_graphs)
