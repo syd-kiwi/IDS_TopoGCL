@@ -20,6 +20,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
+from xgboost import XGBClassifier
 
 
 # =========================================================
@@ -568,6 +569,28 @@ def train_svm_baseline(train_graphs: List[GraphWindow], test_graphs: List[GraphW
     return svm.predict_proba(x_test)[:, 1]
 
 
+def train_xgboost_baseline(train_graphs: List[GraphWindow], test_graphs: List[GraphWindow], seed: int) -> np.ndarray:
+    x_train = np.stack([graph_to_summary_vector(g) for g in train_graphs])
+    y_train = np.array([g.label for g in train_graphs], dtype=np.int64)
+
+    x_test = np.stack([graph_to_summary_vector(g) for g in test_graphs])
+
+    xgb = XGBClassifier(
+        n_estimators=300,
+        max_depth=6,
+        learning_rate=0.05,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        objective="binary:logistic",
+        eval_metric="logloss",
+        random_state=seed,
+        n_jobs=-1,
+    )
+    xgb.fit(x_train, y_train)
+
+    return xgb.predict_proba(x_test)[:, 1]
+
+
 def train_topogcl_scores(
     train_graphs: List[GraphWindow],
     test_graphs: List[GraphWindow],
@@ -678,7 +701,7 @@ def main() -> None:
 
     rows = []
     details = {}
-    per_model_metrics = {"svm": [], "gnn": [], "topogcl": []}
+    per_model_metrics = {"svm": [], "xgboost": [], "gnn": [], "topogcl": []}
     split_info = {}
     labels_info = {}
 
@@ -719,6 +742,13 @@ def main() -> None:
             }
 
         per_model_metrics["svm"].append(compute_metrics(y_test, train_svm_baseline(train_graphs, test_graphs), threshold=0.5))
+        per_model_metrics["xgboost"].append(
+            compute_metrics(
+                y_test,
+                train_xgboost_baseline(train_graphs, test_graphs, seed=seed),
+                threshold=0.5,
+            )
+        )
 
         gnn_scores = train_supervised_gnn(
             train_graphs=train_graphs,
