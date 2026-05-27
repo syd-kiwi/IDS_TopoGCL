@@ -46,6 +46,18 @@ def parse_csv_9ints_stream(
             token_ids[tok] = v
         return v
 
+    def parse_time(token: str) -> Optional[int]:
+        t = token.strip()
+        if not t:
+            return None
+        try:
+            return int(t)
+        except Exception:
+            try:
+                return int(float(t))
+            except Exception:
+                return None
+
     with open(file_path, "r") as f:
         for line in f:
             line = line.strip()
@@ -54,9 +66,8 @@ def parse_csv_9ints_stream(
             parts = line.split(",")
             if len(parts) < 2:
                 continue
-            try:
-                t = int(parts[0])
-            except Exception:
+            t = parse_time(parts[0])
+            if t is None:
                 continue
 
             # Preferred path: already-converted 9-int format.
