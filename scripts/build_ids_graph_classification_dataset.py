@@ -121,8 +121,8 @@ def build_window_graph(dfw: pd.DataFrame, graph_id: int, src_col: str, dst_col: 
 
 def main() -> None:
     # Hardcoded paths/config per request.
-    input_csv = "datasets/NF-BoT-IoT.csv"
-    output_dir = "datasets/IDS_GRAPH_BENCHMARK"
+    input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
+    output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph"
     window_seconds = 300
     max_rows = None
 
