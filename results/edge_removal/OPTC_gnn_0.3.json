@@ -1,0 +1,41 @@
+{
+  "num_benign_windows": 2000,
+  "num_mal_windows": 285,
+  "threshold_q": 0.99,
+  "threshold": 0.01460519,
+  "score_stats": {
+    "benign_train": {
+      "min": 0.0002455,
+      "mean": 0.00491707,
+      "max": 0.01741195
+    },
+    "benign_test": {
+      "min": 0.0002455,
+      "mean": 0.00491707,
+      "max": 0.01741195
+    },
+    "malicious": {
+      "min": 0.00810753,
+      "mean": 0.01449296,
+      "max": 0.02598928
+    }
+  },
+  "metrics": {
+    "accuracy": 0.89,
+    "precision": 0.89,
+    "recall": 0.14,
+    "f1": 0.24,
+    "tpr": 0.14,
+    "fpr": 0.0,
+    "auroc": 0.97
+  },
+  "training": {
+    "epochs": 5,
+    "lr": 0.001,
+    "hidden_dim": 32,
+    "emb_dim": 16,
+    "random_seed": 42,
+    "scenario": "edge_drop",
+    "scenario_rate": 0.3
+  }
+}

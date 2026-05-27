@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Write a random 30% sample from the LANL auth file."""
+"""Write a random 10% sample from the LANL auth file."""
 
 import random
 
 INPUT_PATH = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/LANL/auth.txt"
-OUTPUT_PATH = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/LANL/auth_30pct.txt"
-FRACTION = 0.30
+OUTPUT_PATH = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/LANL/auth_10pct.txt"
+FRACTION = 0.10
 SEED = 42
 HAS_HEADER = True
 

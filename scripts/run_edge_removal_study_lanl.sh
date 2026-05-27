@@ -5,8 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "$ROOT_DIR/results/edge_removal"
 
 RATES=(0.3)
-auth="$ROOT_DIR/datasets/LANL/auth_reformat.txt"
-red="$ROOT_DIR/datasets/LANL/redteam_reformat.txt"
+auth="$ROOT_DIR/datasets/LANL/auth.txt"
+red="$ROOT_DIR/datasets/LANL/redteam.txt"
 topogcl_py="$ROOT_DIR/scripts/ids_topogcl_lanl_baseline.py"
 gnn_py="$ROOT_DIR/scripts/ids_gnn_lanl_baseline.py"
 
