@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -121,17 +120,16 @@ def build_window_graph(dfw: pd.DataFrame, graph_id: int, src_col: str, dst_col: 
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Build IDS graph classification benchmark from NetFlow CSV.")
-    ap.add_argument("--input_csv", required=True)
-    ap.add_argument("--output_dir", default="datasets/IDS_GRAPH_BENCHMARK")
-    ap.add_argument("--window_seconds", type=int, default=300)
-    ap.add_argument("--max_rows", type=int, default=None)
-    args = ap.parse_args()
+    # Hardcoded paths/config per request.
+    input_csv = "datasets/NF-BoT-IoT.csv"
+    output_dir = "datasets/IDS_GRAPH_BENCHMARK"
+    window_seconds = 300
+    max_rows = None
 
-    out_dir = Path(args.output_dir)
+    out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    df = pd.read_csv(args.input_csv, nrows=args.max_rows)
+    df = pd.read_csv(input_csv, nrows=max_rows)
     cols = list(df.columns)
     time_col = find_col(cols, TIME_CANDIDATES)
     src_col = find_col(cols, SRC_IP_CANDIDATES)
@@ -159,7 +157,7 @@ def main() -> None:
         raise ValueError("No numeric NetFlow feature columns found for edge features.")
 
     epoch = (df["__time"].view("int64") // 10**9).astype(np.int64)
-    df["__window"] = (epoch // args.window_seconds).astype(np.int64)
+    df["__window"] = (epoch // window_seconds).astype(np.int64)
 
     graphs: List[GraphSample] = []
     summary = []
@@ -181,7 +179,7 @@ def main() -> None:
     np.save(out_dir / "graphs.npy", np.array(graphs, dtype=object), allow_pickle=True)
     pd.DataFrame(summary).to_csv(out_dir / "graph_summary.csv", index=False)
     with open(out_dir / "metadata.json", "w") as f:
-        json.dump({"edge_feature_columns": edge_feat_cols, "num_graphs": len(graphs)}, f, indent=2)
+        json.dump({"edge_feature_columns": edge_feat_cols, "num_graphs": len(graphs), "input_csv": input_csv, "window_seconds": window_seconds}, f, indent=2)
     print(f"wrote {len(graphs)} graph samples to {out_dir}")
 
 

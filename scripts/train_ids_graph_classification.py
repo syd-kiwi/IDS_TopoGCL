@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import argparse
 import json
 from pathlib import Path
 
@@ -46,28 +45,27 @@ def eval_binary(y_true, y_score):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset_dir", default="datasets/IDS_GRAPH_BENCHMARK")
-    ap.add_argument("--test_size", type=float, default=0.3)
-    ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--epochs", type=int, default=20)
-    ap.add_argument("--out_json", default="results/ids_graph_classification_metrics.json")
-    args = ap.parse_args()
+    # Hardcoded paths/config per request.
+    dataset_dir = "datasets/IDS_GRAPH_BENCHMARK"
+    test_size = 0.3
+    seed = 42
+    epochs = 20
+    out_json = "results/ids_graph_classification_metrics.json"
 
-    graphs = np.load(Path(args.dataset_dir) / "graphs.npy", allow_pickle=True)
+    graphs = np.load(Path(dataset_dir) / "graphs.npy", allow_pickle=True)
     X = np.stack([graph_vector(g) for g in graphs], axis=0)
     y = np.array([int(g.graph_label) for g in graphs], dtype=np.int64)
 
-    Xtr, Xte, ytr, yte, gtr, gte = train_test_split(X, y, graphs, test_size=args.test_size, random_state=args.seed, stratify=y if len(set(y)) > 1 else None)
+    Xtr, Xte, ytr, yte, gtr, gte = train_test_split(X, y, graphs, test_size=test_size, random_state=seed, stratify=y if len(set(y)) > 1 else None)
 
-    svm = SVC(kernel="rbf", probability=True, random_state=args.seed)
+    svm = SVC(kernel="rbf", probability=True, random_state=seed)
     svm.fit(Xtr, ytr)
     svm_prob = svm.predict_proba(Xte)[:, 1]
     svm_metrics = eval_binary(yte, svm_prob)
 
     model = GNN(in_dim=gtr[0].node_features.shape[1])
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-    for _ in range(args.epochs):
+    for _ in range(epochs):
         model.train()
         for g, yy in zip(gtr, ytr):
             x = torch.tensor(g.node_features, dtype=torch.float32)
@@ -90,15 +88,14 @@ def main():
     gnn_prob = predict_scores(gte)
     gnn_metrics = eval_binary(yte, gnn_prob)
 
-    # TopoGCL placeholder: same graph-level vector pipeline with linear proxy.
-    topogcl = SVC(kernel="linear", probability=True, random_state=args.seed)
+    topogcl = SVC(kernel="linear", probability=True, random_state=seed)
     topogcl.fit(Xtr, ytr)
     topogcl_prob = topogcl.predict_proba(Xte)[:, 1]
     topogcl_metrics = eval_binary(yte, topogcl_prob)
 
     out = {"svm": svm_metrics, "gnn": gnn_metrics, "topogcl": topogcl_metrics, "n_train": int(len(ytr)), "n_test": int(len(yte))}
-    Path(args.out_json).parent.mkdir(parents=True, exist_ok=True)
-    with open(args.out_json, "w") as f:
+    Path(out_json).parent.mkdir(parents=True, exist_ok=True)
+    with open(out_json, "w") as f:
         json.dump(out, f, indent=2)
     print(json.dumps(out, indent=2))
 
