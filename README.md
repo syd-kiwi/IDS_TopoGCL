@@ -8,6 +8,8 @@ This folder contains a compact, reproducible workflow for graph-based intrusion 
   Builds graph classification datasets from tabular IDS data.
 - `scripts/train_ids_graph_all_models.py`  
   Trains/evaluates graph-based models across the prepared datasets.
+- `scripts/train_graphsage_gin_append_results.py`  
+  Trains GraphSAGE and GIN on the same graph files/splits recorded in existing result JSON files and appends/upserts their metrics into the matching JSON/CSV outputs.
 - `requirements.txt`  
   Python dependencies for dataset construction and training.
 - `results/`  
@@ -49,6 +51,12 @@ Typical usage:
 
 ```bash
 python scripts/train_ids_graph_all_models.py
+```
+
+To add GraphSAGE and GIN results to all existing experiment outputs without flags:
+
+```bash
+python scripts/train_graphsage_gin_append_results.py
 ```
 
 ## Outputs
