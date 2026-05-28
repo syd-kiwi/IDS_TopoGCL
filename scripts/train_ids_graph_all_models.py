@@ -647,11 +647,11 @@ def main() -> None:
     #GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph")
 
 
-    OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/results_25%.json")
-    OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/summary_25%.csv")
+    OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/results_15%.json")
+    OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/summary_15%.csv")
 
-    #OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/results_02.5%.json")
-    #OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/summary_02.5%.csv")
+    #OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/results_15%.json")
+    #OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/summary_15%.csv")
 
     EPOCHS_TOPOGCL = 100
     EPOCHS_GNN = 1
@@ -671,7 +671,7 @@ def main() -> None:
 
     #TRAIN_RATIO = 0.60
     #VAL_RATIO = 0.15
-    TRAIN_RATIO = 0.25
+    TRAIN_RATIO = 0.15
     VAL_RATIO = 0.15
 
     # Set these to 0 to use all available graphs.
@@ -760,7 +760,7 @@ def main() -> None:
             seed=seed,
             device=device,
         )
-        per_model_metrics["gnn"].append(compute_metrics(y_test, gnn_scores, threshold=0.5))
+        per_model_metrics["gnn"].append(compute_metrics(y_test, gnn_scores, threshold=0.25))
 
         topogcl_scores, topogcl_threshold = train_topogcl_scores(
             train_graphs=train_graphs,
