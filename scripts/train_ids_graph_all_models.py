@@ -563,7 +563,7 @@ def train_svm_baseline(train_graphs: List[GraphWindow], test_graphs: List[GraphW
 
     x_test = np.stack([graph_to_summary_vector(g) for g in test_graphs])
 
-    svm = SVC(kernel="linear", probability=True, random_state=42)
+    svm = SVC(kernel="sigmoid", probability=True, random_state=42)
     svm.fit(x_train, y_train)
 
     return svm.predict_proba(x_test)[:, 1]
@@ -639,19 +639,19 @@ def train_topogcl_scores(
 
 
 def main() -> None:
-    # =========================================================
+    # ========================================================= 
     # Hardcoded configuration
     # Change values here only if needed.
     # =========================================================
-    #GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph")
-    GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph")
+    GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph")
+    #GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph")
 
 
-    #OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/results_05%.json")
-    #OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/summary_05%.csv")
+    OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/results_25%.json")
+    OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/summary_25%.csv")
 
-    OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/results_05%.json")
-    OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/summary_05%.csv")
+    #OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/results_02.5%.json")
+    #OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/summary_02.5%.csv")
 
     EPOCHS_TOPOGCL = 100
     EPOCHS_GNN = 1
@@ -671,7 +671,7 @@ def main() -> None:
 
     #TRAIN_RATIO = 0.60
     #VAL_RATIO = 0.15
-    TRAIN_RATIO = 0.05
+    TRAIN_RATIO = 0.25
     VAL_RATIO = 0.15
 
     # Set these to 0 to use all available graphs.
