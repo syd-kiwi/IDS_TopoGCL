@@ -8,6 +8,8 @@ This folder contains a compact, reproducible workflow for graph-based intrusion 
   Builds graph classification datasets from tabular IDS data.
 - `scripts/train_ids_graph_all_models.py`  
   Trains/evaluates graph-based models across the prepared datasets.
+- `scripts/run_infograph_baseline.py`  
+  Trains only the InfoGraph baseline and appends its summary row to the configured existing results CSV while updating the matching JSON.
 - `scripts/train_graphsage_gin_append_results.py`  
   Trains GraphSAGE and GIN on the configured graph files/splits and appends/upserts their metrics into the configured JSON/CSV outputs.
 - `requirements.txt`  
@@ -53,11 +55,13 @@ Typical usage:
 python scripts/train_ids_graph_all_models.py
 ```
 
-To add GraphSAGE and GIN results to the configured `OUT_JSON` and `OUT_CSV` files without flags:
+To train only InfoGraph and append its row to the configured existing summary CSV without flags:
 
 ```bash
-python scripts/train_graphsage_gin_append_results.py
+python scripts/run_infograph_baseline.py
 ```
+
+The script defaults to `NF-ToN-IoT` with `ton_results_25%.json` and `ton_summary_25%.csv`. Use `--dataset bot` for the `NF-BoT-IoT` 5% paths, or pass `--graph-dir`, `--out-json`, and `--out-csv` to override paths.
 
 ## Outputs
 
