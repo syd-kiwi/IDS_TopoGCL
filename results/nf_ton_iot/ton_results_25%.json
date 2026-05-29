@@ -39,7 +39,11 @@
     "benign_limit": 0,
     "mal_limit": 0,
     "max_graphs": 0,
-    "max_nodes": 50000
+    "max_nodes": 50000,
+    "epochs_graphsage_gin": 1,
+    "lr_graphsage_gin": 0.001,
+    "dropout_graphsage_gin": 0.2,
+    "threshold_graphsage_gin": 0.25
   },
   "models": {
     "svm": {
