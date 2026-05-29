@@ -22,10 +22,18 @@ from train_ids_graph_all_models import (
 
 # =========================================================
 # Hardcoded configuration: no command-line flags.
-# The script discovers existing TopoGCL result files and appends
-# GraphSAGE/GIN metrics using each file's graph directory and split setup.
+# Change these paths here to match the TopoGCL result file you want
+# GraphSAGE/GIN to append to.
 # =========================================================
-RESULT_FILES = sorted(Path("results").glob("*/*_results_*.json"))
+#GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph")
+GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph")
+
+
+#OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_results_05%.json")
+#OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_summary_05%.csv")
+
+OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_results_25%.json")
+OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_summary_25%.csv")
 
 EPOCHS_GRAPHSAGE_GIN = 100
 LR_GRAPHSAGE_GIN = 1e-3
@@ -205,10 +213,6 @@ def train_supervised_graph_classifier(
     return np.array(probs, dtype=np.float32)
 
 
-def summary_csv_for(result_path: Path) -> Path:
-    return result_path.with_name(result_path.name.replace("_results_", "_summary_").replace(".json", ".csv"))
-
-
 def load_existing_csv_rows(csv_path: Path) -> List[dict]:
     if not csv_path.exists():
         return []
@@ -233,12 +237,11 @@ def write_upserted_summary_rows(csv_path: Path, new_rows: Iterable[dict]) -> Non
         writer.writerows(rows_by_model[model] for model in ordered_models)
 
 
-def train_for_result_file(result_path: Path, device: torch.device) -> None:
+def train_for_result_file(graph_dir: Path, result_path: Path, summary_path: Path, device: torch.device) -> None:
     with result_path.open() as f:
         results = json.load(f)
 
     training = results.get("training", {})
-    graph_dir = Path(results["graph_dir"])
     train_ratio = float(results.get("split", {}).get("train_ratio", 0.25))
     val_ratio = float(results.get("split", {}).get("val_ratio", 0.15))
     seeds = [int(seed) for seed in training.get("seeds", [42, 43, 44, 45, 46])]
@@ -319,28 +322,29 @@ def train_for_result_file(result_path: Path, device: torch.device) -> None:
     training["dropout_graphsage_gin"] = DROPOUT
     training["threshold_graphsage_gin"] = THRESHOLD
     results["training"] = training
+    results["graph_dir"] = str(graph_dir)
     results["device"] = str(device)
     results["num_graphs_loaded"] = len(base_graphs)
 
     with result_path.open("w") as f:
         json.dump(results, f, indent=2)
 
-    csv_path = summary_csv_for(result_path)
-    write_upserted_summary_rows(csv_path, new_rows)
+    write_upserted_summary_rows(summary_path, new_rows)
 
     print(f"\n[OK] appended GraphSAGE/GIN results to {result_path}", flush=True)
-    print(f"[OK] appended GraphSAGE/GIN rows to {csv_path}", flush=True)
+    print(f"[OK] appended GraphSAGE/GIN rows to {summary_path}", flush=True)
 
 
 def main() -> None:
-    if not RESULT_FILES:
-        raise FileNotFoundError("No existing result files matched results/*/*_results_*.json")
+    if not OUT_JSON.exists():
+        raise FileNotFoundError(f"Existing TopoGCL result JSON not found: {OUT_JSON}")
+    if not OUT_CSV.exists():
+        raise FileNotFoundError(f"Existing TopoGCL summary CSV not found: {OUT_CSV}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[OK] device: {device}", flush=True)
 
-    for result_path in RESULT_FILES:
-        train_for_result_file(result_path, device=device)
+    train_for_result_file(graph_dir=GRAPH_DIR, result_path=OUT_JSON, summary_path=OUT_CSV, device=device)
 
 
 if __name__ == "__main__":
