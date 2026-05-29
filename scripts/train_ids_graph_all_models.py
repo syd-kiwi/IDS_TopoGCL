@@ -653,19 +653,19 @@ def main() -> None:
     OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_results_25%.json")
     OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_summary_25%.csv")
 
-    EPOCHS_TOPOGCL = 100
+    EPOCHS_TOPOGCL = 25
     EPOCHS_GNN = 1
 
     LR_TOPOGCL = 1e-3
     LR_GNN = 1e-3
 
-    HIDDEN_DIM = 64
-    EMB_DIM = 32
+    HIDDEN_DIM = 16
+    EMB_DIM = 16
 
-    EDGE_DROP = 0.2
-    FEAT_MASK = 0.2
+    EDGE_DROP = 0.001
+    FEAT_MASK = 0.05
     TAU = 0.2
-    BATCH_SIZE = 16
+    BATCH_SIZE = 8
 
     THRESHOLD_Q = 0.99
 
@@ -680,7 +680,8 @@ def main() -> None:
     MAX_GRAPHS = 0
 
     MAX_NODES = 50000
-    SEEDS = [42, 43, 44, 45, 46]
+    SEEDS = [42]
+    #SEEDS = [42, 43, 44, 45, 46]
     STANDARDIZE = True
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

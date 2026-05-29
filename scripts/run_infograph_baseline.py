@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""Train an InfoGraph-only baseline and append its summary to an existing CSV.
-
-The model follows the PyGCL InfoGraph example structure: a multi-layer GIN encoder
-produces node-level and graph-level embeddings, projection heads map both views to
-one contrastive space, and a graph-to-local JSD objective trains the encoder before a
-linear SVM evaluates graph embeddings on the IDS train/test split.
-"""
 from __future__ import annotations
 
 import argparse

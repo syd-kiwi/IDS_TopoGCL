@@ -35,15 +35,15 @@ GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Gr
 OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_results_25%.json")
 OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_summary_25%.csv")
 
-EPOCHS_GRAPHCL = 100
+EPOCHS_GRAPHCL = 25
 LR_GRAPHCL = 1e-3
-HIDDEN_DIM = 64
+HIDDEN_DIM = 16
 NUM_LAYERS = 2
-EDGE_DROP = 0.2
-FEAT_MASK = 0.2
+EDGE_DROP = 0.001
+FEAT_MASK = 0.05
 TAU = 0.2
-BATCH_SIZE = 16
-GRAPHCL_THRESHOLD = 0.25
+BATCH_SIZE = 8
+GRAPHCL_THRESHOLD = 0.50
 
 # TRAIN_RATIO = 0.60
 # VAL_RATIO = 0.15
@@ -56,7 +56,8 @@ MAL_LIMIT = 0
 MAX_GRAPHS = 0
 
 MAX_NODES = 50000
-SEEDS = [42, 43, 44, 45, 46]
+SEEDS = [42]
+#SEEDS = [42, 43, 44, 45, 46]
 STANDARDIZE = True
 MODEL_NAME = "graphcl"
 
