@@ -42,6 +42,122 @@
     "max_nodes": 50000
   },
   "models": {
+    "svm": {
+      "runs": [
+        {
+          "accuracy": 0.91701244813278,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.006108597285067874,
+          "auprc": 0.04481356865652531
+        },
+        {
+          "accuracy": 0.91701244813278,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.1898190045248869,
+          "auprc": 0.08640028626204738
+        },
+        {
+          "accuracy": 0.91701244813278,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.2527149321266968,
+          "auprc": 0.21256623565122973
+        },
+        {
+          "accuracy": 0.91701244813278,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.0045248868778280495,
+          "auprc": 0.04479101034194908
+        },
+        {
+          "accuracy": 0.91701244813278,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.2692307692307692,
+          "auprc": 0.21090264187801228
+        }
+      ],
+      "summary": {
+        "accuracy_mean": 0.91701244813278,
+        "accuracy_std": 0.0,
+        "precision_mean": 0.0,
+        "precision_std": 0.0,
+        "recall_mean": 0.0,
+        "recall_std": 0.0,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "auroc_mean": 0.14447963800904978,
+        "auroc_std": 0.1166766978150562,
+        "auprc_mean": 0.11989474855795276,
+        "auprc_std": 0.07651153539242966
+      }
+    },
+    "xgboost": {
+      "runs": [
+        {
+          "accuracy": 0.91701244813278,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.08298755186721991
+        },
+        {
+          "accuracy": 0.91701244813278,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.08298755186721991
+        },
+        {
+          "accuracy": 0.91701244813278,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.08298755186721991
+        },
+        {
+          "accuracy": 0.91701244813278,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.08298755186721991
+        },
+        {
+          "accuracy": 0.91701244813278,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "auroc": 0.5,
+          "auprc": 0.08298755186721991
+        }
+      ],
+      "summary": {
+        "accuracy_mean": 0.91701244813278,
+        "accuracy_std": 0.0,
+        "precision_mean": 0.0,
+        "precision_std": 0.0,
+        "recall_mean": 0.0,
+        "recall_std": 0.0,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "auroc_mean": 0.5,
+        "auroc_std": 0.0,
+        "auprc_mean": 0.08298755186721991,
+        "auprc_std": 0.0
+      }
+    },
     "gnn": {
       "runs": [
         {

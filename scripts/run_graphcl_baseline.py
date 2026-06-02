@@ -19,6 +19,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.model_selection import train_test_split
+from sklearn.svm import SVC
 
 
 # =========================================================
@@ -467,6 +468,10 @@ def train_graphcl_scores(
     seed: int,
     device: torch.device,
 ) -> np.ndarray:
+    y_train = np.array([g.label for g in train_graphs], dtype=np.int64)
+    if len(np.unique(y_train)) < 2:
+        raise RuntimeError("GraphCL SVM evaluation needs both classes in the train split.")
+
     encoder = train_graphcl_encoder(
         train_graphs=train_graphs,
         in_dim=in_dim,
@@ -481,15 +486,13 @@ def train_graphcl_scores(
         seed=seed,
         device=device,
     )
-    train_benign = [graph for graph in train_graphs if graph.label == 0]
-    if not train_benign:
-        raise RuntimeError("GraphCL distance scoring needs at least one benign graph in the train split.")
-
-    x_train = compute_graphcl_embeddings(encoder, train_benign, device=device, tag="embed graphcl train benign")
+    x_train = compute_graphcl_embeddings(encoder, train_graphs, device=device, tag="embed graphcl train")
     x_test = compute_graphcl_embeddings(encoder, test_graphs, device=device, tag="embed graphcl test")
 
-    center = x_train.mean(axis=0, keepdims=True)
-    return np.linalg.norm(x_test - center, axis=1).astype(np.float32)
+    classifier = SVC(kernel="linear", probability=True, random_state=seed)
+    classifier.fit(x_train, y_train)
+    positive_class_idx = int(np.where(classifier.classes_ == 1)[0][0])
+    return classifier.predict_proba(x_test)[:, positive_class_idx]
 
 
 # =========================================================

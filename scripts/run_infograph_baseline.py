@@ -19,6 +19,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.model_selection import train_test_split
+from sklearn.svm import SVC
 
 
 @dataclass
@@ -413,25 +414,10 @@ def train_infograph_scores(
         tag="embed infograph test",
     ).numpy()
 
-    y_train = torch.tensor([g.label for g in train_graphs], dtype=torch.long, device=device)
-    train_tensor = torch.tensor(train_embeddings, dtype=torch.float32, device=device)
-    test_tensor = torch.tensor(test_embeddings, dtype=torch.float32, device=device)
-
-    torch.manual_seed(seed)
-    classifier = torch.nn.Linear(train_tensor.shape[1], 2).to(device)
-    optimizer = torch.optim.Adam(classifier.parameters(), lr=lr)
-    for epoch in range(max(1, epochs)):
-        logits = classifier(train_tensor)
-        loss = torch.nn.functional.cross_entropy(logits, y_train)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        if (epoch + 1) % max(1, epochs // 5) == 0 or epoch == 0:
-            print(f"infograph classifier epoch {epoch + 1}/{max(1, epochs)} loss={float(loss.item()):.6f}", flush=True)
-
-    classifier.eval()
-    with torch.no_grad():
-        return torch.softmax(classifier(test_tensor), dim=1)[:, 1].detach().cpu().numpy()
+    y_train = np.array([g.label for g in train_graphs], dtype=np.int64)
+    svm = SVC(kernel="linear", probability=True, random_state=seed)
+    svm.fit(train_embeddings, y_train)
+    return svm.predict_proba(test_embeddings)[:, 1]
 
 
 def safe_auc(y_true: np.ndarray, y_score: np.ndarray) -> float:
