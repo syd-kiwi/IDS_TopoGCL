@@ -23,6 +23,8 @@ from sklearn.model_selection import train_test_split
 
 
 CSV_FIELDNAMES = [
+    "dataset",
+    "train_ratio",
     "model",
     "accuracy_mean",
     "accuracy_std",
@@ -38,35 +40,6 @@ CSV_FIELDNAMES = [
     "auprc_std",
 ]
 METRIC_NAMES = ["accuracy", "precision", "recall", "f1", "auroc", "auprc"]
-
-MODEL_INFO = {
-    "gnn": ("GNN", "basic supervised graph model"),
-    "graphsage": ("GraphSAGE", "stronger supervised graph model"),
-    "graphcl": ("GraphCL", "standard graph contrastive learning baseline"),
-    "topoids": ("TopoIDS", "topology-aware IDS model already present in the pipeline"),
-}
-MODEL_ALIASES = {
-    "gnn": "gnn",
-    "graphsage": "graphsage",
-    "sage": "graphsage",
-    "graphcl": "graphcl",
-    "topoids": "topoids",
-}
-
-
-def normalize_model_name(model_name: str) -> str:
-    key = model_name.strip().lower()
-    if key not in MODEL_ALIASES:
-        raise ValueError(f"Unknown graph model: {model_name}")
-    return MODEL_ALIASES[key]
-
-
-def canonical_model_name(model_name: str) -> str:
-    return MODEL_INFO[normalize_model_name(model_name)][0]
-
-
-def model_description(model_name: str) -> str:
-    return MODEL_INFO[normalize_model_name(model_name)][1]
 
 
 @dataclass
@@ -90,10 +63,10 @@ class ExperimentConfig:
     seeds: Tuple[int, ...]
     epochs_supervised: int
     epochs_graphcl: int
-    epochs_topoids: int
+    epochs_topogcl: int
     lr_supervised: float
     lr_graphcl: float
-    lr_topoids: float
+    lr_topogcl: float
     hidden_dim: int
     emb_dim: int
     graphcl_layers: int
@@ -553,7 +526,7 @@ def train_graphcl_scores(
 
 
 # =========================================================
-# TopoIDS-style contrastive graph scoring already in the pipeline.
+# TopoGCL/TopoIDS-style contrastive graph scoring already in the pipeline.
 # =========================================================
 def loss_cal(z1: torch.Tensor, z2: torch.Tensor, zt1: torch.Tensor, zt2: torch.Tensor, tau: float) -> torch.Tensor:
     z1_abs = z1.norm(dim=1).clamp_min(1e-12)
@@ -570,7 +543,7 @@ def loss_cal(z1: torch.Tensor, z2: torch.Tensor, zt1: torch.Tensor, zt2: torch.T
     return (-torch.log((loss1 + 0.1 * loss2).clamp_min(1e-12))).mean()
 
 
-def train_topoids_encoder(
+def train_topogcl_encoder(
     model: GCN,
     graphs: List[GraphWindow],
     config: ExperimentConfig,
@@ -578,11 +551,11 @@ def train_topoids_encoder(
     device: torch.device,
 ) -> None:
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr_topoids)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr_topogcl)
     rng = torch.Generator().manual_seed(seed)
     indices = torch.arange(len(graphs))
 
-    for epoch in range(config.epochs_topoids):
+    for epoch in range(config.epochs_topogcl):
         permutation = indices[torch.randperm(len(graphs), generator=rng)]
         total_loss = 0.0
         seen = 0
@@ -617,7 +590,7 @@ def train_topoids_encoder(
             optimizer.step()
             total_loss += float(loss.item()) * len(batch_indices)
             seen += len(batch_indices)
-        print(f"    topoids epoch {epoch + 1}/{config.epochs_topoids} loss={total_loss / max(seen, 1):.6f}", flush=True)
+        print(f"    topogcl epoch {epoch + 1}/{config.epochs_topogcl} loss={total_loss / max(seen, 1):.6f}", flush=True)
 
 
 def compute_gcn_embeddings(model: GCN, graphs: List[GraphWindow], device: torch.device, tag: str) -> torch.Tensor:
@@ -632,7 +605,7 @@ def compute_gcn_embeddings(model: GCN, graphs: List[GraphWindow], device: torch.
     return torch.stack(embeddings, dim=0)
 
 
-def train_topoids_scores(
+def train_topogcl_scores(
     train_graphs: List[GraphWindow],
     eval_graphs: List[GraphWindow],
     in_dim: int,
@@ -642,11 +615,11 @@ def train_topoids_scores(
 ) -> np.ndarray:
     train_benign = [g for g in train_graphs if g.label == 0]
     if len(train_benign) < 2:
-        raise RuntimeError("TopoIDS needs at least two benign graphs in the train split.")
+        raise RuntimeError("TopoGCL needs at least two benign graphs in the train split.")
     model = GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.emb_dim)
-    train_topoids_encoder(model=model, graphs=train_benign, config=config, seed=seed, device=device)
-    train_emb = compute_gcn_embeddings(model, train_benign, device=device, tag="embed topoids train benign")
-    eval_emb = compute_gcn_embeddings(model, eval_graphs, device=device, tag="embed topoids eval")
+    train_topogcl_encoder(model=model, graphs=train_benign, config=config, seed=seed, device=device)
+    train_emb = compute_gcn_embeddings(model, train_benign, device=device, tag="embed topogcl train benign")
+    eval_emb = compute_gcn_embeddings(model, eval_graphs, device=device, tag="embed topogcl eval")
     center = train_emb.mean(dim=0)
     return torch.norm(eval_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32)
 
@@ -714,9 +687,13 @@ def read_existing_csv_rows(path: Path) -> List[Dict[str, str]]:
 def write_summary_csv(path: Path, rows: List[Dict[str, object]], append: bool) -> None:
     merged_rows: List[Dict[str, object]] = []
     if append:
-        incoming_keys = {str(row["model"]) for row in rows}
+        incoming_keys = {(str(row["dataset"]), str(row["train_ratio"]), str(row["model"])) for row in rows}
         for existing in read_existing_csv_rows(path):
-            existing_key = str(existing.get("model", ""))
+            existing_key = (
+                str(existing.get("dataset", "")),
+                str(existing.get("train_ratio", "")),
+                str(existing.get("model", "")),
+            )
             if existing_key not in incoming_keys:
                 merged_rows.append(existing)
     merged_rows.extend(rows)
@@ -800,16 +777,16 @@ def model_runner(
             torch.norm(test_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32),
         )
 
-    if model_name == "topoids":
+    if model_name == "topogcl":
         train_benign = [g for g in train_graphs if g.label == 0]
         if len(train_benign) < 2:
-            raise RuntimeError("TopoIDS needs at least two benign graphs in the train split.")
+            raise RuntimeError("TopoGCL needs at least two benign graphs in the train split.")
         model = GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.emb_dim)
-        train_topoids_encoder(model=model, graphs=train_benign, config=config, seed=seed, device=device)
-        train_emb = compute_gcn_embeddings(model, train_benign, device=device, tag="embed topoids train benign")
+        train_topogcl_encoder(model=model, graphs=train_benign, config=config, seed=seed, device=device)
+        train_emb = compute_gcn_embeddings(model, train_benign, device=device, tag="embed topogcl train benign")
         center = train_emb.mean(dim=0)
-        val_emb = compute_gcn_embeddings(model, val_graphs, device=device, tag="embed topoids val")
-        test_emb = compute_gcn_embeddings(model, test_graphs, device=device, tag="embed topoids test")
+        val_emb = compute_gcn_embeddings(model, val_graphs, device=device, tag="embed topogcl val")
+        test_emb = compute_gcn_embeddings(model, test_graphs, device=device, tag="embed topogcl test")
         return (
             torch.norm(val_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32),
             torch.norm(test_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32),
@@ -876,7 +853,7 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
             y_test = np.array([g.label for g in test_graphs], dtype=np.int64)
 
             for model_name in config.models:
-                print(f"[MODEL] dataset={config.dataset} train_ratio={train_ratio} model={canonical_model_name(model_name)} - {model_description(model_name)}", flush=True)
+                print(f"[MODEL] dataset={config.dataset} train_ratio={train_ratio} model={model_name}", flush=True)
                 val_scores, test_scores = model_runner(
                     model_name=model_name,
                     train_graphs=train_graphs,
@@ -894,8 +871,8 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
 
         for model_name, metrics_list in per_model_metrics.items():
             summary = summarize_metrics(metrics_list)
-            summary_rows.append({"model": canonical_model_name(model_name), **summary})
-            all_details[ratio_key]["models"][canonical_model_name(model_name)] = {"runs": metrics_list, "summary": summary}
+            summary_rows.append({"dataset": config.dataset, "train_ratio": train_ratio, "model": model_name, **summary})
+            all_details[ratio_key]["models"][model_name] = {"runs": metrics_list, "summary": summary}
 
     results = {
         "dataset": config.dataset,
@@ -905,13 +882,13 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
         "train_ratios": list(config.train_ratios),
         "runs_by_train_ratio": all_details,
         "training": {
-            "models": [canonical_model_name(model) for model in config.models],
+            "models": list(config.models),
             "epochs_supervised": config.epochs_supervised,
             "epochs_graphcl": config.epochs_graphcl,
-            "epochs_topoids": config.epochs_topoids,
+            "epochs_topogcl": config.epochs_topogcl,
             "lr_supervised": config.lr_supervised,
             "lr_graphcl": config.lr_graphcl,
-            "lr_topoids": config.lr_topoids,
+            "lr_topogcl": config.lr_topogcl,
             "hidden_dim": config.hidden_dim,
             "emb_dim": config.emb_dim,
             "graphcl_layers": config.graphcl_layers,
@@ -963,17 +940,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-ratios", default="0.25")
     parser.add_argument("--val-ratio", type=float, default=0.15)
     parser.add_argument("--seeds", default="42")
-    parser.add_argument(
-        "--models",
-        default="gnn,graphsage,graphcl,topoids",
-        help="Comma-separated graph models: GNN, GraphSAGE, GraphCL, TopoIDS",
-    )
+    parser.add_argument("--models", default="gnn,graphsage,graphcl,topogcl", help="Comma-separated graph models: gnn,graphsage,graphcl,topogcl")
     parser.add_argument("--epochs-supervised", type=int, default=1)
     parser.add_argument("--epochs-graphcl", type=int, default=100)
-    parser.add_argument("--epochs-topoids", type=int, default=25)
+    parser.add_argument("--epochs-topogcl", type=int, default=25)
     parser.add_argument("--lr-supervised", type=float, default=1e-3)
     parser.add_argument("--lr-graphcl", type=float, default=1e-3)
-    parser.add_argument("--lr-topoids", type=float, default=1e-3)
+    parser.add_argument("--lr-topogcl", type=float, default=1e-3)
     parser.add_argument("--hidden-dim", type=int, default=16)
     parser.add_argument("--emb-dim", type=int, default=16)
     parser.add_argument("--graphcl-layers", type=int, default=2)
@@ -990,14 +963,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
-    models_list: List[str] = []
-    for raw_model in args.models.split(","):
-        if not raw_model.strip():
-            continue
-        model = normalize_model_name(raw_model)
-        if model not in models_list:
-            models_list.append(model)
-    models = tuple(models_list)
+    models = tuple(model.strip().lower() for model in args.models.split(",") if model.strip())
+    allowed = {"gnn", "graphsage", "graphcl", "topogcl"}
+    unknown = set(models) - allowed
+    if unknown:
+        raise ValueError(f"Unknown models {sorted(unknown)}; allowed models are {sorted(allowed)}")
     return ExperimentConfig(
         dataset=args.dataset or infer_dataset_name(args.graph_dir),
         graph_dir=args.graph_dir,
@@ -1008,10 +978,10 @@ def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
         seeds=parse_int_tuple(args.seeds),
         epochs_supervised=args.epochs_supervised,
         epochs_graphcl=args.epochs_graphcl,
-        epochs_topoids=args.epochs_topoids,
+        epochs_topogcl=args.epochs_topogcl,
         lr_supervised=args.lr_supervised,
         lr_graphcl=args.lr_graphcl,
-        lr_topoids=args.lr_topoids,
+        lr_topogcl=args.lr_topogcl,
         hidden_dim=args.hidden_dim,
         emb_dim=args.emb_dim,
         graphcl_layers=args.graphcl_layers,
