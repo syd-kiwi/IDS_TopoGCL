@@ -30,16 +30,21 @@
     "threshold_q": 0.99,
     "standardized": true,
     "seeds": [
-      42,
-      43,
-      44,
-      45,
-      46
+      42
     ],
     "benign_limit": 0,
     "mal_limit": 0,
     "max_graphs": 0,
-    "max_nodes": 50000
+    "max_nodes": 50000,
+    "epochs_graphcl": 25,
+    "lr_graphcl": 0.001,
+    "graphcl_hidden_dim": 16,
+    "graphcl_num_layers": 2,
+    "graphcl_edge_drop": 0.001,
+    "graphcl_feat_mask": 0.05,
+    "graphcl_tau": 0.2,
+    "graphcl_batch_size": 8,
+    "graphcl_threshold": 0.5
   },
   "models": {
     "svm": {
@@ -272,6 +277,32 @@
         "auroc_std": 0.006553914414120708,
         "auprc_mean": 0.7362549633433806,
         "auprc_std": 0.10951529068527506
+      }
+    },
+    "graphcl": {
+      "runs": [
+        {
+          "accuracy": 0.976303317535545,
+          "precision": 0.9285714285714286,
+          "recall": 0.7647058823529411,
+          "f1": 0.8387096774193549,
+          "auroc": 0.9948453608247423,
+          "auprc": 0.8532289365766874
+        }
+      ],
+      "summary": {
+        "accuracy_mean": 0.976303317535545,
+        "accuracy_std": 0.0,
+        "precision_mean": 0.9285714285714286,
+        "precision_std": 0.0,
+        "recall_mean": 0.7647058823529411,
+        "recall_std": 0.0,
+        "f1_mean": 0.8387096774193549,
+        "f1_std": 0.0,
+        "auroc_mean": 0.9948453608247423,
+        "auroc_std": 0.0,
+        "auprc_mean": 0.8532289365766874,
+        "auprc_std": 0.0
       }
     }
   }

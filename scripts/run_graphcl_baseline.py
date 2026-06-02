@@ -32,8 +32,8 @@ GRAPH_DIR = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Gr
 # OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_results_05%.json")
 # OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_summary_05%.csv")
 
-OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_results_25%.json")
-OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_summary_25%.csv")
+OUT_JSON = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_results_15%.json")
+OUT_CSV = Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_summary_15%.csv")
 
 EPOCHS_GRAPHCL = 25
 LR_GRAPHCL = 1e-3
@@ -47,7 +47,7 @@ GRAPHCL_THRESHOLD = 0.50
 
 # TRAIN_RATIO = 0.60
 # VAL_RATIO = 0.15
-TRAIN_RATIO = 0.25
+TRAIN_RATIO = 0.15
 VAL_RATIO = 0.15
 
 # Set these to 0 to use all available graphs.
