@@ -22,18 +22,23 @@ from build_ids_graph_classification_dataset import (
     CHUNK_SIZE,
     DST_IP_CANDIDATES,
     FIXED_NODE_FEATURES,
+    LABEL_CANDIDATES,
     MAX_EDGES,
+    PROTO_CANDIDATES,
     REQUIRED_EDGE_FEATURES,
     SRC_IP_CANDIDATES,
     TIME_CANDIDATES,
     _numeric,
     apply_edge_limits,
+    assert_graph_shapes,
     find_col,
     normalize_chunk,
 )
 from train_ids_binary import (
     GCN,
+    GraphCLGINEncoder,
     GraphSAGEEncoder,
+    augment_graph_view,
     build_sparse_a_hat_from_undirected,
     compute_gcn_embeddings,
     compute_graphcl_embeddings,
@@ -58,49 +63,6 @@ FOLDER_TO_FAMILY_EXACT = {
 }
 MODEL_DISPLAY = {"gnn": "GNN", "graphsage": "GraphSAGE", "graphcl": "GraphCL", "topoids": "TopoIDS", "topogcl": "TopoIDS"}
 METRIC_NAMES = ["accuracy", "macro_precision", "macro_recall", "macro_f1", "weighted_f1"]
-TABULAR_RESERVED_COLUMNS = {"label", "attack", "attacktype", "attack_cat", "class", "sub_label"}
-CICIOT2023_AGGREGATE_COLUMNS = [
-    "Header_Length",
-    "Protocol Type",
-    "Time_To_Live",
-    "Rate",
-    "fin_flag_number",
-    "syn_flag_number",
-    "rst_flag_number",
-    "psh_flag_number",
-    "ack_flag_number",
-    "ece_flag_number",
-    "cwr_flag_number",
-    "ack_count",
-    "syn_count",
-    "fin_count",
-    "rst_count",
-    "HTTP",
-    "HTTPS",
-    "DNS",
-    "Telnet",
-    "SMTP",
-    "SSH",
-    "IRC",
-    "TCP",
-    "UDP",
-    "DHCP",
-    "ARP",
-    "ICMP",
-    "IGMP",
-    "IPv",
-    "LLC",
-    "Tot sum",
-    "Min",
-    "Max",
-    "AVG",
-    "Std",
-    "Tot size",
-    "IAT",
-    "Number",
-    "Variance",
-]
-
 CSV_FIELDNAMES = [
     "dataset",
     "model",
@@ -304,174 +266,6 @@ def append_graph_summary(summary_path: Path, sample: FolderGraphSample) -> None:
         )
 
 
-def numeric_feature_columns(columns: Sequence[str]) -> List[str]:
-    return [col for col in columns if col.strip().lower() not in TABULAR_RESERVED_COLUMNS]
-
-
-def is_ciciot2023_aggregate_columns(columns: Sequence[str]) -> bool:
-    return set(CICIOT2023_AGGREGATE_COLUMNS).issubset(set(columns))
-
-
-def build_tabular_feature_graph(
-    dfw: pd.DataFrame,
-    graph_id: int,
-    feature_cols: List[str],
-    label: int,
-    family: str,
-    original_label: str,
-) -> FolderGraphSample:
-    node_features = dfw[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
-    node_features = np.nan_to_num(node_features, nan=0.0, posinf=0.0, neginf=0.0)
-    num_nodes = int(node_features.shape[0])
-    if num_nodes <= 1:
-        edge_index = np.zeros((2, 0), dtype=np.int64)
-        edge_features = np.zeros((0, 1), dtype=np.float32)
-    else:
-        src = np.arange(num_nodes - 1, dtype=np.int64)
-        dst = np.arange(1, num_nodes, dtype=np.int64)
-        edge_index = np.stack([src, dst], axis=0)
-        edge_features = np.ones((num_nodes - 1, 1), dtype=np.float32)
-    is_benign = family == "Benign"
-    return FolderGraphSample(
-        graph_id=graph_id,
-        node_features=node_features,
-        edge_index=edge_index,
-        edge_features=edge_features,
-        label=label,
-        family=family,
-        original_label=original_label,
-        num_benign_flows=num_nodes if is_benign else 0,
-        num_attack_flows=0 if is_benign else num_nodes,
-    )
-
-
-def save_sample_if_usable(sample: FolderGraphSample, out_dir: Path, summary_path: Path, family: str) -> bool:
-    min_edges = BENIGN_MIN_EDGES if family == "Benign" else ATTACK_MIN_EDGES
-    sample = apply_edge_limits(sample, min_edges, MAX_EDGES)
-    if sample is None:
-        return False
-    if sample.node_features.ndim != 2 or sample.edge_index.shape[0] != 2:
-        raise ValueError(
-            f"Invalid graph shapes for graph_id={sample.graph_id}: "
-            f"node_features={sample.node_features.shape}, edge_index={sample.edge_index.shape}"
-        )
-    save_multiclass_graph_npz(sample, out_dir)
-    append_graph_summary(summary_path, sample)
-    return True
-
-
-def build_graphs_from_csv(
-    input_csv: Path,
-    folder_name: str,
-    family: str,
-    class_id: int,
-    config: ExperimentConfig,
-    out_dir: Path,
-    summary_path: Path,
-    start_graph_id: int,
-) -> Tuple[int, int]:
-    header_df = pd.read_csv(input_csv, nrows=1)
-    cols = list(header_df.columns)
-    if is_ciciot2023_aggregate_columns(cols):
-        print(
-            f"[INFO] {input_csv} matches the released CICIoT2023 aggregate-feature header; "
-            "using folder-labeled tabular window graph construction.",
-            flush=True,
-        )
-        return build_tabular_graphs_from_csv(input_csv, folder_name, family, class_id, config, out_dir, summary_path, start_graph_id)
-
-    time_col = find_col(cols, TIME_CANDIDATES)
-    src_col = find_col(cols, SRC_IP_CANDIDATES)
-    dst_col = find_col(cols, DST_IP_CANDIDATES)
-    missing_edge_cols = [col for col in REQUIRED_EDGE_FEATURES if col not in cols]
-    missing_flow_cols = []
-    if time_col is None:
-        missing_flow_cols.append("time")
-    if src_col is None:
-        missing_flow_cols.append("src_ip")
-    if dst_col is None:
-        missing_flow_cols.append("dst_ip")
-    missing_flow_cols.extend(missing_edge_cols)
-    can_use_flow_pipeline = not missing_flow_cols
-    if not can_use_flow_pipeline:
-        # The released CICIoT2023 per-attack CSVs are aggregate feature tables
-        # (e.g. Header_Length, Protocol Type, Rate, ...), not raw flow/IP
-        # tables. Use the folder as the original attack label instead of
-        # requiring missing time/IP/label columns.
-        print(
-            f"[INFO] {input_csv} lacks flow graph columns {missing_flow_cols}; "
-            "using CICIoT2023 folder-labeled tabular window graph construction.",
-            flush=True,
-        )
-        return build_tabular_graphs_from_csv(input_csv, folder_name, family, class_id, config, out_dir, summary_path, start_graph_id)
-
-    graph_count = start_graph_id
-    total_rows_read = 0
-    carry_window_df = pd.DataFrame()
-    for chunk in pd.read_csv(input_csv, chunksize=CHUNK_SIZE):
-        total_rows_read += len(chunk)
-        cleaned_chunk = normalize_chunk(chunk, time_col, src_col, dst_col, REQUIRED_EDGE_FEATURES.copy(), config.window_size)
-        if cleaned_chunk.empty and carry_window_df.empty:
-            continue
-        current_df = pd.concat([carry_window_df, cleaned_chunk], ignore_index=True)
-        if current_df.empty:
-            continue
-        windows = current_df["__window"].to_numpy()
-        last_window = windows[-1]
-        complete_df = current_df.loc[windows != last_window]
-        carry_window_df = current_df.loc[windows == last_window].copy()
-        for _, gdf in complete_df.groupby("__window", sort=True):
-            sample = build_folder_window_graph(gdf, graph_count, src_col, dst_col, REQUIRED_EDGE_FEATURES.copy(), class_id, family, folder_name)
-            if save_sample_if_usable(sample, out_dir, summary_path, family):
-                graph_count += 1
-            if config.max_graphs > 0 and graph_count >= config.max_graphs:
-                return graph_count, total_rows_read
-    if not carry_window_df.empty and (config.max_graphs <= 0 or graph_count < config.max_graphs):
-        sample = build_folder_window_graph(carry_window_df, graph_count, src_col, dst_col, REQUIRED_EDGE_FEATURES.copy(), class_id, family, folder_name)
-        if save_sample_if_usable(sample, out_dir, summary_path, family):
-            graph_count += 1
-    return graph_count, total_rows_read
-
-
-def build_tabular_graphs_from_csv(
-    input_csv: Path,
-    folder_name: str,
-    family: str,
-    class_id: int,
-    config: ExperimentConfig,
-    out_dir: Path,
-    summary_path: Path,
-    start_graph_id: int,
-) -> Tuple[int, int]:
-    header_df = pd.read_csv(input_csv, nrows=1)
-    feature_cols = numeric_feature_columns(list(header_df.columns))
-    if not feature_cols:
-        raise ValueError(f"No numeric feature columns found in {input_csv}. Available columns: {list(header_df.columns)}")
-
-    graph_count = start_graph_id
-    total_rows_read = 0
-    carry_df = pd.DataFrame()
-    rows_per_graph = max(2, int(config.window_size))
-    for chunk in pd.read_csv(input_csv, chunksize=CHUNK_SIZE):
-        total_rows_read += len(chunk)
-        chunk = chunk[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
-        current_df = pd.concat([carry_df, chunk], ignore_index=True)
-        while len(current_df) >= rows_per_graph:
-            gdf = current_df.iloc[:rows_per_graph].copy()
-            current_df = current_df.iloc[rows_per_graph:].reset_index(drop=True)
-            sample = build_tabular_feature_graph(gdf, graph_count, feature_cols, class_id, family, folder_name)
-            if save_sample_if_usable(sample, out_dir, summary_path, family):
-                graph_count += 1
-            if config.max_graphs > 0 and graph_count >= config.max_graphs:
-                return graph_count, total_rows_read
-        carry_df = current_df.reset_index(drop=True)
-    if not carry_df.empty and (config.max_graphs <= 0 or graph_count < config.max_graphs):
-        sample = build_tabular_feature_graph(carry_df, graph_count, feature_cols, class_id, family, folder_name)
-        if save_sample_if_usable(sample, out_dir, summary_path, family):
-            graph_count += 1
-    return graph_count, total_rows_read
-
-
 def mapped_dataset_folders(dataset_root: Path, graph_cache_dir: Path) -> List[Tuple[Path, str]]:
     folders: List[Tuple[Path, str]] = []
     cache_resolved = graph_cache_dir.resolve()
@@ -502,16 +296,59 @@ def build_graph_cache(config: ExperimentConfig, label_to_id: Dict[str, int]) -> 
             print(f"[WARN] no CSV files found in {folder}", flush=True)
             continue
         for input_csv in csv_paths:
-            graph_count, total_rows_read = build_graphs_from_csv(
-                input_csv=input_csv,
-                folder_name=folder.name,
-                family=family,
-                class_id=class_id,
-                config=config,
-                out_dir=out_dir,
-                summary_path=summary_path,
-                start_graph_id=graph_count,
-            )
+            header_df = pd.read_csv(input_csv, nrows=1)
+            cols = list(header_df.columns)
+            time_col = find_col(cols, TIME_CANDIDATES)
+            src_col = find_col(cols, SRC_IP_CANDIDATES)
+            dst_col = find_col(cols, DST_IP_CANDIDATES)
+            proto_col = find_col(cols, PROTO_CANDIDATES)
+            label_col = find_col(cols, LABEL_CANDIDATES)
+            missing = [name for name, c in [("time", time_col), ("src_ip", src_col), ("dst_ip", dst_col), ("protocol", proto_col), ("label", label_col)] if c is None]
+            if missing:
+                raise ValueError(f"Missing required columns {missing} in {input_csv}. Available columns: {cols}")
+            missing_edge_cols = [c for c in REQUIRED_EDGE_FEATURES if c not in cols]
+            if missing_edge_cols:
+                raise ValueError(f"Missing required edge feature columns {missing_edge_cols} in {input_csv}")
+
+            carry_window_df = pd.DataFrame()
+            total_rows_read = 0
+            for chunk in pd.read_csv(input_csv, chunksize=CHUNK_SIZE):
+                total_rows_read += len(chunk)
+                cleaned_chunk = normalize_chunk(chunk, time_col, src_col, dst_col, REQUIRED_EDGE_FEATURES.copy(), config.window_size)
+                if cleaned_chunk.empty and carry_window_df.empty:
+                    continue
+                current_df = pd.concat([carry_window_df, cleaned_chunk], ignore_index=True)
+                if current_df.empty:
+                    continue
+                windows = current_df["__window"].to_numpy()
+                last_window = windows[-1]
+                complete_df = current_df.loc[windows != last_window]
+                carry_window_df = current_df.loc[windows == last_window].copy()
+                for _, gdf in complete_df.groupby("__window", sort=True):
+                    sample = build_folder_window_graph(gdf, graph_count, src_col, dst_col, REQUIRED_EDGE_FEATURES.copy(), class_id, family, folder.name)
+                    min_edges = BENIGN_MIN_EDGES if family == "Benign" else ATTACK_MIN_EDGES
+                    sample = apply_edge_limits(sample, min_edges, MAX_EDGES)
+                    if sample is None:
+                        continue
+                    assert_graph_shapes(sample)  # type: ignore[arg-type]
+                    save_multiclass_graph_npz(sample, out_dir)
+                    append_graph_summary(summary_path, sample)
+                    graph_count += 1
+                    if config.max_graphs > 0 and graph_count >= config.max_graphs:
+                        break
+                if config.max_graphs > 0 and graph_count >= config.max_graphs:
+                    break
+            if config.max_graphs > 0 and graph_count >= config.max_graphs:
+                break
+            if not carry_window_df.empty:
+                sample = build_folder_window_graph(carry_window_df, graph_count, src_col, dst_col, REQUIRED_EDGE_FEATURES.copy(), class_id, family, folder.name)
+                min_edges = BENIGN_MIN_EDGES if family == "Benign" else ATTACK_MIN_EDGES
+                sample = apply_edge_limits(sample, min_edges, MAX_EDGES)
+                if sample is not None:
+                    assert_graph_shapes(sample)  # type: ignore[arg-type]
+                    save_multiclass_graph_npz(sample, out_dir)
+                    append_graph_summary(summary_path, sample)
+                    graph_count += 1
             print(f"[OK] processed {input_csv} rows={total_rows_read} graphs_so_far={graph_count}", flush=True)
             if config.max_graphs > 0 and graph_count >= config.max_graphs:
                 break
@@ -523,7 +360,6 @@ def build_graph_cache(config: ExperimentConfig, label_to_id: Dict[str, int]) -> 
             {
                 "dataset_root": str(config.dataset_root),
                 "window_size": config.window_size,
-                "window_size_units": "seconds for flow/IP CSVs; rows for CICIoT2023 aggregate feature CSVs without time/IP columns",
                 "node_feature_columns": FIXED_NODE_FEATURES,
                 "edge_feature_columns": REQUIRED_EDGE_FEATURES,
                 "class_to_id": label_to_id,
