@@ -39,8 +39,6 @@ from build_ids_graph_classification_dataset import (
 )
 
 BENIGN_FOLDER_NAME = "Benign_Final"
-EXCLUDED_CSV_DIR_NAMES = {"Graph", "Graphs", "graph", "graphs", "results", "Results", "__pycache__"}
-METADATA_CSV_NAMES = {"graph_window_metadata.csv", "graph_window_summary.csv"}
 
 
 @dataclass
@@ -118,24 +116,8 @@ def dataset_folders(dataset_root: Path, output_dir: Path) -> List[Path]:
     return folders
 
 
-def path_is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.resolve().relative_to(parent.resolve())
-        return True
-    except ValueError:
-        return False
-
-
-def is_candidate_flow_csv(path: Path, output_dir: Path) -> bool:
-    if path.name in METADATA_CSV_NAMES:
-        return False
-    if any(part in EXCLUDED_CSV_DIR_NAMES for part in path.parts):
-        return False
-    return not path_is_relative_to(path, output_dir)
-
-
-def csv_files_for_folder(folder: Path, output_dir: Path, max_files_per_class: int) -> List[Path]:
-    paths = [path for path in sorted(folder.rglob("*.csv")) if is_candidate_flow_csv(path, output_dir)]
+def csv_files_for_folder(folder: Path, max_files_per_class: int) -> List[Path]:
+    paths = sorted(folder.rglob("*.csv"))
     if max_files_per_class > 0:
         return paths[:max_files_per_class]
     return paths
@@ -515,16 +497,12 @@ def main() -> None:
         raise RuntimeError(f"No class folders found in {args.dataset_root}")
 
     for folder in folders:
-        csv_paths = csv_files_for_folder(folder, out_dir, args.max_files_per_class)
+        csv_paths = csv_files_for_folder(folder, args.max_files_per_class)
         if not csv_paths:
             print(f"[WARN] no CSV files found in {folder}", flush=True)
             continue
         for input_csv in csv_paths:
-            try:
-                graph_count = process_csv(input_csv, folder.name, out_dir, metadata_path, graph_count, class_counts, args)
-            except ValueError as exc:
-                print(f"[WARN] skipped non-flow CSV {input_csv}: {exc}", flush=True)
-                continue
+            graph_count = process_csv(input_csv, folder.name, out_dir, metadata_path, graph_count, class_counts, args)
             files_by_folder[folder.name] += 1
 
     if metadata_path.exists():
