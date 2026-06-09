@@ -6,12 +6,10 @@ This folder contains a compact, reproducible workflow for graph-based intrusion 
 
 - `scripts/build_ids_graph_classification_dataset.py`  
   Builds graph classification datasets from tabular IDS data.
-- `scripts/train_ids_graph_all_models.py`  
-  Trains/evaluates graph-based models across the prepared datasets.
-- `scripts/run_infograph_baseline.py`  
-  Trains only the InfoGraph baseline and appends its summary row to the configured existing results CSV while updating the matching JSON.
-- `scripts/train_graphsage_gin_append_results.py`  
-  Trains GraphSAGE and GIN on the configured graph files/splits and appends/upserts their metrics into the configured JSON/CSV outputs.
+- `scripts/train_ids_binary.py`
+  Trains GraphCL/TopoGCL and launches external InfoGraph/RGCL baselines, then writes the same JSON and summary CSV format.
+- `scripts/train_ids_supervised_baselines.py`
+  Trains the supervised GNN and GraphSAGE baselines separately from the unsupervised binary IDS pipeline.
 - `requirements.txt`  
   Python dependencies for dataset construction and training.
 - `results/`  
@@ -46,22 +44,30 @@ python scripts/build_ids_graph_classification_dataset.py
 Run the training/evaluation pipeline (use `--help` for available flags):
 
 ```bash
-python scripts/train_ids_graph_all_models.py --help
+python scripts/train_ids_binary.py --help
 ```
 
 Typical usage:
 
 ```bash
-python scripts/train_ids_graph_all_models.py
+python scripts/train_ids_binary.py
 ```
 
-To train only InfoGraph and append its row to the configured existing summary CSV without flags:
+InfoGraph and RGCL are launched from the external repositories supplied with `--infograph-dir` and `--rgcl-dir`. By default, the commands are equivalent to:
 
 ```bash
-python scripts/run_infograph_baseline.py
+cd /home/kiwi-pandas/Documents/IDS_TopoGCL/InfoGraph/unsupervised
+python main.py --DS DATASET_NAME --lr 0.001 --num-gc-layers 3
+
+cd /home/kiwi-pandas/Documents/IDS_TopoGCL/RGCL/unsupervised_TU
+python rgcl.py --seed $seed --DS $dataset
 ```
 
-The script defaults to `NF-ToN-IoT` with `ton_results_25%.json` and `ton_summary_25%.csv`. Use `--dataset bot` for the `NF-BoT-IoT` 5% paths, or pass `--graph-dir`, `--out-json`, and `--out-csv` to override paths.
+To run the removed supervised baselines separately:
+
+```bash
+python scripts/train_ids_supervised_baselines.py
+```
 
 ## Outputs
 
