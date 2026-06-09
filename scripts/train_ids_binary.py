@@ -4,10 +4,12 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import random
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -20,6 +22,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
 
 
 CSV_FIELDNAMES = [
@@ -64,9 +67,13 @@ class ExperimentConfig:
     epochs_supervised: int
     epochs_graphcl: int
     epochs_topogcl: int
+    epochs_infograph: int
     lr_supervised: float
     lr_graphcl: float
     lr_topogcl: float
+    lr_infograph: float
+    infograph_layers: int
+    rgcl_dir: Path
     hidden_dim: int
     emb_dim: int
     graphcl_layers: int
@@ -280,6 +287,8 @@ def build_sparse_a_hat_from_undirected(
 
 
 class GCN(torch.nn.Module):
+    """Small GCN encoder retained for TopoGCL embeddings."""
+
     def __init__(self, in_dim: int, hidden_dim: int, out_dim: int) -> None:
         super().__init__()
         self.w1 = torch.nn.Linear(in_dim, hidden_dim)
@@ -525,6 +534,255 @@ def train_graphcl_scores(
     return distances.astype(np.float32)
 
 
+@dataclass
+class InfoGraphBatch:
+    x: torch.Tensor
+    edge_index: torch.Tensor
+    batch: torch.Tensor
+    y: torch.Tensor
+
+    @property
+    def num_graphs(self) -> int:
+        return int(self.y.numel())
+
+    def to(self, device: torch.device) -> "InfoGraphBatch":
+        return InfoGraphBatch(
+            x=self.x.to(device),
+            edge_index=self.edge_index.to(device),
+            batch=self.batch.to(device),
+            y=self.y.to(device),
+        )
+
+
+def graph_windows_to_infograph_batch(graphs: Sequence[GraphWindow], in_dim: int) -> InfoGraphBatch:
+    xs: List[torch.Tensor] = []
+    edge_indices: List[torch.Tensor] = []
+    batch_parts: List[torch.Tensor] = []
+    labels: List[int] = []
+    node_offset = 0
+
+    for graph_idx, graph in enumerate(graphs):
+        x = graph.x
+        if x is None:
+            x = torch.ones((max(graph.num_nodes, 1), in_dim), dtype=torch.float32)
+        if x.ndim == 1:
+            x = x.reshape(-1, 1)
+        if x.shape[1] != in_dim:
+            if x.shape[1] == 0:
+                x = torch.ones((x.shape[0], in_dim), dtype=torch.float32)
+            elif x.shape[1] < in_dim:
+                padding = torch.zeros((x.shape[0], in_dim - x.shape[1]), dtype=x.dtype)
+                x = torch.cat([x, padding], dim=1)
+            else:
+                x = x[:, :in_dim]
+        x = x.float()
+        num_nodes = int(x.shape[0])
+        xs.append(x)
+        batch_parts.append(torch.full((num_nodes,), graph_idx, dtype=torch.long))
+        labels.append(int(graph.label))
+
+        if graph.edges_undirected.numel() > 0:
+            u = graph.edges_undirected[0] + node_offset
+            v = graph.edges_undirected[1] + node_offset
+            edge_indices.append(torch.stack([torch.cat([u, v]), torch.cat([v, u])], dim=0))
+        node_offset += num_nodes
+
+    x_all = torch.cat(xs, dim=0) if xs else torch.zeros((0, in_dim), dtype=torch.float32)
+    edge_index = torch.cat(edge_indices, dim=1) if edge_indices else torch.zeros((2, 0), dtype=torch.long)
+    batch = torch.cat(batch_parts, dim=0) if batch_parts else torch.zeros((0,), dtype=torch.long)
+    y = torch.tensor(labels, dtype=torch.long)
+    return InfoGraphBatch(x=x_all, edge_index=edge_index, batch=batch, y=y)
+
+
+def iter_infograph_batches(
+    graphs: Sequence[GraphWindow],
+    batch_size: int,
+    in_dim: int,
+    rng: random.Random,
+    shuffle: bool,
+) -> Iterable[InfoGraphBatch]:
+    indices = list(range(len(graphs)))
+    if shuffle:
+        rng.shuffle(indices)
+    for start in range(0, len(indices), batch_size):
+        batch_indices = indices[start : start + batch_size]
+        yield graph_windows_to_infograph_batch([graphs[idx] for idx in batch_indices], in_dim=in_dim)
+
+
+def global_add_pool(x: torch.Tensor, batch: torch.Tensor, num_graphs: Optional[int] = None) -> torch.Tensor:
+    if num_graphs is None:
+        num_graphs = int(batch.max().item()) + 1 if batch.numel() > 0 else 0
+    pooled = torch.zeros((num_graphs, x.shape[1]), dtype=x.dtype, device=x.device)
+    if batch.numel() > 0:
+        pooled.index_add_(0, batch, x)
+    return pooled
+
+
+class IDSGINConv(torch.nn.Module):
+    """GIN-style convolution for local IDS batches without requiring TUDataset."""
+
+    def __init__(self, network: torch.nn.Module) -> None:
+        super().__init__()
+        self.network = network
+        self.eps = torch.nn.Parameter(torch.zeros(1))
+
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        aggregated = torch.zeros_like(x)
+        if edge_index.numel() > 0:
+            src, dst = edge_index
+            aggregated.index_add_(0, dst, x[src])
+        return self.network((1.0 + self.eps) * x + aggregated)
+
+
+class InfoGraphEncoder(torch.nn.Module):
+    def __init__(self, in_dim: int, hidden_dim: int, num_gc_layers: int) -> None:
+        super().__init__()
+        self.convs = torch.nn.ModuleList()
+        self.norms = torch.nn.ModuleList()
+        for layer_idx in range(num_gc_layers):
+            layer_in_dim = in_dim if layer_idx == 0 else hidden_dim
+            self.convs.append(
+                IDSGINConv(
+                    torch.nn.Sequential(
+                        torch.nn.Linear(layer_in_dim, hidden_dim),
+                        torch.nn.ReLU(),
+                        torch.nn.Linear(hidden_dim, hidden_dim),
+                    )
+                )
+            )
+            self.norms.append(torch.nn.LayerNorm(hidden_dim))
+        self.output_dim = hidden_dim * num_gc_layers
+
+    def forward(self, data: InfoGraphBatch) -> Tuple[torch.Tensor, torch.Tensor]:
+        h = data.x
+        local_layers: List[torch.Tensor] = []
+        global_layers: List[torch.Tensor] = []
+        for conv, norm in zip(self.convs, self.norms):
+            h = torch.relu(norm(conv(h, data.edge_index)))
+            local_layers.append(h)
+            global_layers.append(global_add_pool(h, data.batch, num_graphs=data.num_graphs))
+        return torch.cat(local_layers, dim=1), torch.cat(global_layers, dim=1)
+
+
+class InfoGraphFF(torch.nn.Module):
+    def __init__(self, dim: int) -> None:
+        super().__init__()
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(dim, dim),
+            torch.nn.ReLU(),
+            torch.nn.Linear(dim, dim),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class InfoGraphIDS(torch.nn.Module):
+    def __init__(self, in_dim: int, hidden_dim: int, num_gc_layers: int) -> None:
+        super().__init__()
+        self.encoder = InfoGraphEncoder(in_dim=in_dim, hidden_dim=hidden_dim, num_gc_layers=num_gc_layers)
+        self.local_ff = InfoGraphFF(self.encoder.output_dim)
+        self.global_ff = InfoGraphFF(self.encoder.output_dim)
+        self.output_dim = self.encoder.output_dim
+
+    def forward(self, data: InfoGraphBatch) -> Tuple[torch.Tensor, torch.Tensor]:
+        local_emb, global_emb = self.encoder(data)
+        return self.local_ff(local_emb), self.global_ff(global_emb)
+
+    def embed(self, data: InfoGraphBatch) -> torch.Tensor:
+        _, global_emb = self.encoder(data)
+        return global_emb
+
+
+def infograph_local_global_loss(local_emb: torch.Tensor, global_emb: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
+    scores = torch.matmul(local_emb, global_emb.t())
+    graph_ids = torch.arange(global_emb.shape[0], device=global_emb.device)
+    positive_mask = batch.unsqueeze(1) == graph_ids.unsqueeze(0)
+    negative_mask = ~positive_mask
+
+    positive_loss = torch.nn.functional.softplus(-scores[positive_mask]).mean()
+    if negative_mask.any():
+        negative_loss = torch.nn.functional.softplus(scores[negative_mask]).mean()
+        return positive_loss + negative_loss
+    return positive_loss
+
+
+def train_infograph_encoder(
+    train_graphs: List[GraphWindow],
+    in_dim: int,
+    config: ExperimentConfig,
+    seed: int,
+    device: torch.device,
+) -> InfoGraphIDS:
+    torch.manual_seed(seed)
+    rng = random.Random(seed)
+    model = InfoGraphIDS(in_dim=in_dim, hidden_dim=config.hidden_dim, num_gc_layers=config.infograph_layers).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr_infograph)
+
+    for epoch in range(config.epochs_infograph):
+        model.train()
+        total_loss = 0.0
+        seen = 0
+        for batch in iter_infograph_batches(train_graphs, config.batch_size, in_dim=in_dim, rng=rng, shuffle=True):
+            batch = batch.to(device)
+            local_emb, global_emb = model(batch)
+            loss = infograph_local_global_loss(local_emb, global_emb, batch.batch)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += float(loss.item()) * max(batch.num_graphs, 1)
+            seen += batch.num_graphs
+        print(f"    infograph epoch {epoch + 1}/{config.epochs_infograph} loss={total_loss / max(seen, 1):.6f}", flush=True)
+    return model
+
+
+def compute_infograph_embeddings(
+    model: InfoGraphIDS,
+    graphs: List[GraphWindow],
+    in_dim: int,
+    batch_size: int,
+    device: torch.device,
+    tag: str,
+) -> torch.Tensor:
+    embeddings: List[torch.Tensor] = []
+    model.eval()
+    rng = random.Random(0)
+    with torch.no_grad():
+        seen = 0
+        for batch in iter_infograph_batches(graphs, batch_size, in_dim=in_dim, rng=rng, shuffle=False):
+            batch = batch.to(device)
+            embeddings.append(model.embed(batch).detach().cpu())
+            seen += batch.num_graphs
+            print(f"    {tag}: {seen}/{len(graphs)}", flush=True)
+    return torch.cat(embeddings, dim=0)
+
+
+def train_infograph_ids(
+    train_graphs: List[GraphWindow],
+    test_graphs: List[GraphWindow],
+    in_dim: int,
+    config: ExperimentConfig,
+    seed: int,
+    device: torch.device,
+) -> Dict[str, float]:
+    y_train = np.array([g.label for g in train_graphs], dtype=np.int64)
+    if len(np.unique(y_train)) < 2:
+        raise RuntimeError("InfoGraph logistic regression needs both classes in the train split.")
+
+    model = train_infograph_encoder(train_graphs=train_graphs, in_dim=in_dim, config=config, seed=seed, device=device)
+    train_emb = compute_infograph_embeddings(model, train_graphs, in_dim, config.batch_size, device, tag="embed infograph train")
+    test_emb = compute_infograph_embeddings(model, test_graphs, in_dim, config.batch_size, device, tag="embed infograph test")
+
+    classifier = LogisticRegression(class_weight="balanced", max_iter=1000, random_state=seed)
+    classifier.fit(train_emb.numpy(), y_train)
+    class_index = int(np.where(classifier.classes_ == 1)[0][0])
+    y_test = np.array([g.label for g in test_graphs], dtype=np.int64)
+    test_scores = classifier.predict_proba(test_emb.numpy())[:, class_index].astype(np.float32)
+    metrics = compute_metrics(y_test, test_scores, threshold=0.5)
+    metrics["threshold"] = 0.5
+    return metrics
+
+
 # =========================================================
 # TopoGCL/TopoIDS-style contrastive graph scoring already in the pipeline.
 # =========================================================
@@ -706,6 +964,72 @@ def write_summary_csv(path: Path, rows: List[Dict[str, object]], append: bool) -
             writer.writerow({field: row.get(field, "") for field in CSV_FIELDNAMES})
 
 
+EXTERNAL_METRIC_PATTERNS = {
+    "accuracy": ("accuracy", "acc"),
+    "precision": ("precision", "prec"),
+    "recall": ("recall", "rec"),
+    "f1": ("f1", "f1_score", "f1-score"),
+    "auroc": ("auroc", "roc_auc", "roc-auc", "auc"),
+    "auprc": ("auprc", "average_precision", "avg_precision", "ap"),
+}
+
+
+def normalize_external_dataset_name(dataset: str) -> str:
+    """Map display names to TU-style dataset identifiers accepted by external repos."""
+    return (
+        dataset.replace("NF-", "NF_")
+        .replace("-", "_")
+        .replace(" ", "_")
+        .replace("%", "")
+    )
+
+
+def parse_external_metrics(output: str) -> Dict[str, float]:
+    metrics: Dict[str, float] = {}
+    for canonical, aliases in EXTERNAL_METRIC_PATTERNS.items():
+        matches: List[float] = []
+        for alias in aliases:
+            pattern = rf"(?i)(?:^|[^a-z0-9_]){re.escape(alias)}(?:[^a-z0-9_]|$)\s*[:=,\t ]+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
+            matches.extend(float(match) for match in re.findall(pattern, output))
+        if matches:
+            value = matches[-1]
+            metrics[canonical] = value / 100.0 if value > 1.0 and value <= 100.0 else value
+    missing = [name for name in METRIC_NAMES if name not in metrics]
+    if missing:
+        raise RuntimeError(
+            "Could not parse external metrics "
+            f"{missing}. Expected keys like accuracy, precision, recall, f1, auroc, and auprc in output."
+        )
+    return metrics
+
+
+def run_external_command(model_name: str, command: List[str], workdir: Path) -> Dict[str, float]:
+    if not workdir.exists():
+        raise FileNotFoundError(f"{model_name} directory not found: {workdir}")
+    print(f"    running {model_name}: {' '.join(command)} (cwd={workdir})", flush=True)
+    completed = subprocess.run(
+        command,
+        cwd=workdir,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    print(completed.stdout, flush=True)
+    if completed.returncode != 0:
+        raise RuntimeError(f"{model_name} command failed with exit code {completed.returncode}")
+    return parse_external_metrics(completed.stdout)
+
+
+def run_rgcl_external(config: ExperimentConfig, seed: int) -> Dict[str, float]:
+    dataset_name = normalize_external_dataset_name(config.dataset)
+    return run_external_command(
+        model_name="rgcl",
+        command=["python", "rgcl.py", "--seed", str(seed), "--DS", dataset_name],
+        workdir=config.rgcl_dir,
+    )
+
+
 def model_runner(
     model_name: str,
     train_graphs: List[GraphWindow],
@@ -715,7 +1039,7 @@ def model_runner(
     config: ExperimentConfig,
     seed: int,
     device: torch.device,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray] | Dict[str, float]:
     if model_name == "gnn":
         factory = lambda: GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.hidden_dim)
         classifier = train_supervised_graph_model(
@@ -792,6 +1116,20 @@ def model_runner(
             torch.norm(test_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32),
         )
 
+    if model_name == "infograph":
+        return train_infograph_ids(
+            train_graphs=train_graphs,
+            test_graphs=test_graphs,
+            in_dim=in_dim,
+            config=config,
+            seed=seed,
+            device=device,
+        )
+
+    if model_name == "rgcl":
+        metrics = run_rgcl_external(config=config, seed=seed)
+        return metrics
+
     raise ValueError(f"Unknown graph model: {model_name}")
 
 
@@ -854,7 +1192,7 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
 
             for model_name in config.models:
                 print(f"[MODEL] dataset={config.dataset} train_ratio={train_ratio} model={model_name}", flush=True)
-                val_scores, test_scores = model_runner(
+                result = model_runner(
                     model_name=model_name,
                     train_graphs=train_graphs,
                     val_graphs=val_graphs,
@@ -864,9 +1202,13 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
                     seed=seed,
                     device=device,
                 )
-                threshold = best_threshold_from_validation(y_val, val_scores)
-                metrics = compute_metrics(y_test, test_scores, threshold=threshold)
-                metrics["threshold"] = threshold
+                if isinstance(result, dict):
+                    metrics = result
+                else:
+                    val_scores, test_scores = result
+                    threshold = best_threshold_from_validation(y_val, val_scores)
+                    metrics = compute_metrics(y_test, test_scores, threshold=threshold)
+                    metrics["threshold"] = threshold
                 per_model_metrics[model_name].append(metrics)
 
         for model_name, metrics_list in per_model_metrics.items():
@@ -886,9 +1228,13 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
             "epochs_supervised": config.epochs_supervised,
             "epochs_graphcl": config.epochs_graphcl,
             "epochs_topogcl": config.epochs_topogcl,
+            "epochs_infograph": config.epochs_infograph,
             "lr_supervised": config.lr_supervised,
             "lr_graphcl": config.lr_graphcl,
             "lr_topogcl": config.lr_topogcl,
+            "lr_infograph": config.lr_infograph,
+            "infograph_layers": config.infograph_layers,
+            "rgcl_dir": str(config.rgcl_dir),
             "hidden_dim": config.hidden_dim,
             "emb_dim": config.emb_dim,
             "graphcl_layers": config.graphcl_layers,
@@ -940,13 +1286,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-ratios", default="0.25")
     parser.add_argument("--val-ratio", type=float, default=0.15)
     parser.add_argument("--seeds", default="42,43,44")
-    parser.add_argument("--models", default="gnn,graphsage,graphcl,topogcl", help="Comma-separated graph models: gnn,graphsage,graphcl,topogcl")
+    parser.add_argument("--models", default="gnn,graphsage,graphcl,topogcl,infograph", help="Comma-separated graph models: gnn,graphsage,graphcl,topogcl,infograph,rgcl")
     parser.add_argument("--epochs-supervised", type=int, default=10)
     parser.add_argument("--epochs-graphcl", type=int, default=10)
     parser.add_argument("--epochs-topogcl", type=int, default=10)
+    parser.add_argument("--epochs-infograph", type=int, default=25)
     parser.add_argument("--lr-supervised", type=float, default=1e-3)
     parser.add_argument("--lr-graphcl", type=float, default=1e-3)
     parser.add_argument("--lr-topogcl", type=float, default=1e-3)
+    parser.add_argument("--lr-infograph", type=float, default=1e-3)
+    parser.add_argument("--infograph-layers", type=int, default=3)
+    parser.add_argument("--rgcl-dir", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/RGCL/unsupervised_TU"))
     parser.add_argument("--hidden-dim", type=int, default=16)
     parser.add_argument("--emb-dim", type=int, default=16)
     parser.add_argument("--graphcl-layers", type=int, default=16)
@@ -964,7 +1314,7 @@ def parse_args() -> argparse.Namespace:
 
 def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
     models = tuple(model.strip().lower() for model in args.models.split(",") if model.strip())
-    allowed = {"gnn", "graphsage", "graphcl", "topogcl"}
+    allowed = {"gnn", "graphsage", "graphcl", "topogcl", "infograph", "rgcl"}
     unknown = set(models) - allowed
     if unknown:
         raise ValueError(f"Unknown models {sorted(unknown)}; allowed models are {sorted(allowed)}")
@@ -979,9 +1329,13 @@ def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
         epochs_supervised=args.epochs_supervised,
         epochs_graphcl=args.epochs_graphcl,
         epochs_topogcl=args.epochs_topogcl,
+        epochs_infograph=args.epochs_infograph,
         lr_supervised=args.lr_supervised,
         lr_graphcl=args.lr_graphcl,
         lr_topogcl=args.lr_topogcl,
+        lr_infograph=args.lr_infograph,
+        infograph_layers=args.infograph_layers,
+        rgcl_dir=args.rgcl_dir,
         hidden_dim=args.hidden_dim,
         emb_dim=args.emb_dim,
         graphcl_layers=args.graphcl_layers,
