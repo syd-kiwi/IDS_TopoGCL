@@ -59,6 +59,14 @@ class GraphWindow:
 
 
 @dataclass(frozen=True)
+class ModelAugmentationConfig:
+    edge_drop: float
+    feat_mask: float
+    tau: float
+    batch_size: int
+
+
+@dataclass(frozen=True)
 class ExperimentConfig:
     dataset: str
     graph_dir: Path
@@ -89,6 +97,46 @@ class ExperimentConfig:
     max_nodes: int
     standardize: bool
     models: Tuple[str, ...]
+
+
+def get_model_augmentation_config(model_name: str, config: ExperimentConfig) -> ModelAugmentationConfig:
+    """Return model-specific contrastive augmentation settings.
+
+    GraphCL keeps the user-provided/default augmentation behavior. TopoGCL
+    intentionally uses a lighter topology-aware setup so small IDS graphs retain
+    more of their edge structure during contrastive training.
+    """
+    model_configs = {
+        "graphcl": ModelAugmentationConfig(
+            edge_drop=config.edge_drop,
+            feat_mask=config.feat_mask,
+            tau=config.tau,
+            batch_size=config.batch_size,
+        ),
+        "topogcl": ModelAugmentationConfig(
+            edge_drop=0.01,
+            feat_mask=0.05,
+            tau=0.10,
+            batch_size=config.batch_size,
+        ),
+    }
+    try:
+        return model_configs[model_name]
+    except KeyError as exc:
+        raise ValueError(f"No augmentation config defined for model: {model_name}") from exc
+
+
+def format_config_float(value: float) -> str:
+    return f"{value:.3f}" if 0 < abs(value) < 0.01 else f"{value:.2f}"
+
+
+def log_augmentation_config(model_name: str, aug_config: ModelAugmentationConfig) -> None:
+    print(
+        f"[CONFIG] model={model_name} edge_drop={format_config_float(aug_config.edge_drop)} "
+        f"feat_mask={format_config_float(aug_config.feat_mask)} "
+        f"tau={format_config_float(aug_config.tau)} batch_size={aug_config.batch_size}",
+        flush=True,
+    )
 
 
 # =========================================================
@@ -663,6 +711,7 @@ def train_topogcl_encoder(
     model: GCN,
     graphs: List[GraphWindow],
     config: ExperimentConfig,
+    aug_config: ModelAugmentationConfig,
     seed: int,
     device: torch.device,
 ) -> None:
@@ -675,8 +724,8 @@ def train_topogcl_encoder(
         permutation = indices[torch.randperm(len(graphs), generator=rng)]
         total_loss = 0.0
         seen = 0
-        for start in range(0, len(graphs), config.batch_size):
-            batch_indices = permutation[start : start + config.batch_size].tolist()
+        for start in range(0, len(graphs), aug_config.batch_size):
+            batch_indices = permutation[start : start + aug_config.batch_size].tolist()
             if len(batch_indices) < 2:
                 continue
             z1_list: List[torch.Tensor] = []
@@ -685,8 +734,8 @@ def train_topogcl_encoder(
             zt2_list: List[torch.Tensor] = []
             for idx in batch_indices:
                 graph = graphs[idx]
-                x1, adj1 = augment_graph_view(graph, config.edge_drop, config.feat_mask, rng)
-                x2, adj2 = augment_graph_view(graph, config.edge_drop, config.feat_mask, rng)
+                x1, adj1 = augment_graph_view(graph, aug_config.edge_drop, aug_config.feat_mask, rng)
+                x2, adj2 = augment_graph_view(graph, aug_config.edge_drop, aug_config.feat_mask, rng)
                 x1 = x1.to(device)
                 x2 = x2.to(device)
                 adj1 = adj1.to(device)
@@ -700,7 +749,13 @@ def train_topogcl_encoder(
                     x2_topo[:, 3:] = 0.0
                 zt1_list.append(model(x1_topo, adj1))
                 zt2_list.append(model(x2_topo, adj2))
-            loss = loss_cal(torch.stack(z1_list), torch.stack(z2_list), torch.stack(zt1_list), torch.stack(zt2_list), tau=config.tau)
+            loss = loss_cal(
+                torch.stack(z1_list),
+                torch.stack(z2_list),
+                torch.stack(zt1_list),
+                torch.stack(zt2_list),
+                tau=aug_config.tau,
+            )
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -999,6 +1054,8 @@ def model_runner(
         )
 
     if model_name == "graphcl":
+        aug_config = get_model_augmentation_config(model_name, config)
+        log_augmentation_config(model_name, aug_config)
         encoder = train_graphcl_encoder(
             train_graphs=train_graphs,
             in_dim=in_dim,
@@ -1006,10 +1063,10 @@ def model_runner(
             num_layers=config.graphcl_layers,
             epochs=config.epochs_graphcl,
             lr=config.lr_graphcl,
-            edge_drop=config.edge_drop,
-            feat_mask=config.feat_mask,
-            tau=config.tau,
-            batch_size=config.batch_size,
+            edge_drop=aug_config.edge_drop,
+            feat_mask=aug_config.feat_mask,
+            tau=aug_config.tau,
+            batch_size=aug_config.batch_size,
             seed=seed,
             device=device,
         )
@@ -1026,11 +1083,20 @@ def model_runner(
         )
 
     if model_name == "topogcl":
+        aug_config = get_model_augmentation_config(model_name, config)
+        log_augmentation_config(model_name, aug_config)
         train_benign = [g for g in train_graphs if g.label == 0]
         if len(train_benign) < 2:
             raise RuntimeError("TopoGCL needs at least two benign graphs in the train split.")
         model = GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.emb_dim)
-        train_topogcl_encoder(model=model, graphs=train_benign, config=config, seed=seed, device=device)
+        train_topogcl_encoder(
+            model=model,
+            graphs=train_benign,
+            config=config,
+            aug_config=aug_config,
+            seed=seed,
+            device=device,
+        )
         train_emb = compute_gcn_embeddings(model, train_benign, device=device, tag="embed topogcl train benign")
         center = train_emb.mean(dim=0)
         val_emb = compute_gcn_embeddings(model, val_graphs, device=device, tag="embed topogcl val")
