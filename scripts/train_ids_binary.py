@@ -9,7 +9,7 @@ import random
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -21,7 +21,11 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
+from torch_geometric.data import Data
+from torch_geometric.loader import DataLoader
+from torch_geometric.nn import GINConv, global_add_pool
 
 
 CSV_FIELDNAMES = [
@@ -65,6 +69,7 @@ class ExperimentConfig:
     seeds: Tuple[int, ...]
     epochs_graphcl: int
     epochs_topogcl: int
+    epochs_infograph: int
     lr_graphcl: float
     lr_topogcl: float
     lr_infograph: float
@@ -296,6 +301,187 @@ class GCN(torch.nn.Module):
         h = torch.relu(torch.sparse.mm(a_hat, self.w1(x)))
         h = torch.sparse.mm(a_hat, self.w2(h))
         return h.mean(dim=0)
+
+
+class InfoGraphFF(torch.nn.Module):
+    def __init__(self, input_dim: int, hidden_dim: int) -> None:
+        super().__init__()
+        self.ff = torch.nn.Sequential(
+            torch.nn.Linear(input_dim, hidden_dim),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_dim, input_dim),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.ff(x)
+
+
+class InfoGraphEncoder(torch.nn.Module):
+    def __init__(self, input_dim: int, hidden_dim: int, num_gc_layers: int = 3) -> None:
+        super().__init__()
+        self.input_dim = input_dim
+        self.convs = torch.nn.ModuleList()
+        self.norms = torch.nn.ModuleList()
+        for layer_idx in range(num_gc_layers):
+            in_dim = input_dim if layer_idx == 0 else hidden_dim
+            mlp = torch.nn.Sequential(
+                torch.nn.Linear(in_dim, hidden_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(hidden_dim, hidden_dim),
+            )
+            self.convs.append(GINConv(mlp))
+            self.norms.append(torch.nn.BatchNorm1d(hidden_dim))
+        self.output_dim = hidden_dim * num_gc_layers
+
+    def forward(
+        self,
+        x: Optional[torch.Tensor],
+        edge_index: torch.Tensor,
+        batch: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if x is None:
+            x = torch.ones((batch.numel(), self.input_dim), dtype=torch.float32, device=batch.device)
+        h = x.float()
+        local_embeddings: List[torch.Tensor] = []
+        global_embeddings: List[torch.Tensor] = []
+        for conv, norm in zip(self.convs, self.norms):
+            h = conv(h, edge_index)
+            if h.shape[0] > 1:
+                h = norm(h)
+            h = torch.relu(h)
+            local_embeddings.append(h)
+            global_embeddings.append(global_add_pool(h, batch))
+        return torch.cat(local_embeddings, dim=1), torch.cat(global_embeddings, dim=1)
+
+
+class InfoGraphIDS(torch.nn.Module):
+    def __init__(self, input_dim: int, hidden_dim: int, num_gc_layers: int = 3) -> None:
+        super().__init__()
+        self.encoder = InfoGraphEncoder(input_dim=input_dim, hidden_dim=hidden_dim, num_gc_layers=num_gc_layers)
+        self.local_ff = InfoGraphFF(self.encoder.output_dim, hidden_dim)
+        self.global_ff = InfoGraphFF(self.encoder.output_dim, hidden_dim)
+        self.output_dim = self.encoder.output_dim
+
+    def forward(self, data: Data) -> Tuple[torch.Tensor, torch.Tensor]:
+        local_emb, global_emb = self.encoder(data.x, data.edge_index, data.batch)
+        return self.local_ff(local_emb), self.global_ff(global_emb)
+
+    def embed(self, data: Data) -> torch.Tensor:
+        _, global_emb = self.encoder(data.x, data.edge_index, data.batch)
+        return global_emb
+
+
+def graph_to_pyg_data(graph: GraphWindow, fallback_in_dim: int) -> Data:
+    x = graph.x
+    if x is None:
+        x = torch.ones((graph.num_nodes, fallback_in_dim), dtype=torch.float32)
+    if x.ndim == 1:
+        x = x.reshape(-1, 1)
+    edges = graph.edges_undirected
+    if edges.numel() == 0:
+        edge_index = torch.zeros((2, 0), dtype=torch.long)
+    else:
+        edge_index = torch.cat([edges, edges.flip(0)], dim=1).long().contiguous()
+    return Data(x=x.float(), edge_index=edge_index, y=torch.tensor([graph.label], dtype=torch.long))
+
+
+def make_pyg_loader(
+    graphs: List[GraphWindow],
+    batch_size: int,
+    shuffle: bool,
+    fallback_in_dim: int,
+) -> DataLoader:
+    return DataLoader(
+        [graph_to_pyg_data(graph, fallback_in_dim=fallback_in_dim) for graph in graphs],
+        batch_size=batch_size,
+        shuffle=shuffle,
+    )
+
+
+def infograph_local_global_loss(local_emb: torch.Tensor, global_emb: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
+    scores = torch.matmul(local_emb, global_emb.t())
+    positive_scores = scores[torch.arange(local_emb.shape[0], device=local_emb.device), batch]
+    positive_loss = torch.nn.functional.softplus(-positive_scores).mean()
+
+    negative_mask = torch.ones_like(scores, dtype=torch.bool)
+    negative_mask[torch.arange(local_emb.shape[0], device=local_emb.device), batch] = False
+    if negative_mask.any():
+        negative_loss = torch.nn.functional.softplus(scores[negative_mask]).mean()
+    else:
+        negative_loss = torch.zeros((), dtype=local_emb.dtype, device=local_emb.device)
+    return positive_loss + negative_loss
+
+
+def compute_infograph_embeddings(model: InfoGraphIDS, loader: DataLoader, device: torch.device, tag: str) -> Tuple[np.ndarray, np.ndarray]:
+    embeddings: List[torch.Tensor] = []
+    labels: List[torch.Tensor] = []
+    model.eval()
+    total = len(loader.dataset)
+    seen = 0
+    with torch.no_grad():
+        for data in loader:
+            data = data.to(device)
+            emb = model.embed(data).detach().cpu()
+            embeddings.append(emb)
+            labels.append(data.y.view(-1).detach().cpu())
+            seen += emb.shape[0]
+            if seen % max(1, total // 10) == 0 or seen == total:
+                print(f"    {tag}: {seen}/{total}", flush=True)
+    return torch.cat(embeddings, dim=0).numpy(), torch.cat(labels, dim=0).numpy()
+
+
+def train_infograph_ids(
+    train_graphs: List[GraphWindow],
+    test_graphs: List[GraphWindow],
+    in_dim: int,
+    config: ExperimentConfig,
+    seed: int,
+    device: torch.device,
+) -> Dict[str, float]:
+    torch.manual_seed(seed)
+    train_loader = make_pyg_loader(train_graphs, batch_size=config.batch_size, shuffle=True, fallback_in_dim=in_dim)
+    train_eval_loader = make_pyg_loader(train_graphs, batch_size=config.batch_size, shuffle=False, fallback_in_dim=in_dim)
+    test_loader = make_pyg_loader(test_graphs, batch_size=config.batch_size, shuffle=False, fallback_in_dim=in_dim)
+
+    model = InfoGraphIDS(input_dim=in_dim, hidden_dim=config.hidden_dim, num_gc_layers=config.infograph_layers).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr_infograph)
+
+    for epoch in range(config.epochs_infograph):
+        model.train()
+        total_loss = 0.0
+        seen = 0
+        for data in train_loader:
+            data = data.to(device)
+            local_emb, global_emb = model(data)
+            loss = infograph_local_global_loss(local_emb, global_emb, data.batch)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            graphs_in_batch = int(data.y.numel())
+            total_loss += float(loss.item()) * graphs_in_batch
+            seen += graphs_in_batch
+        print(f"    infograph epoch {epoch + 1}/{config.epochs_infograph} loss={total_loss / max(seen, 1):.6f}", flush=True)
+
+    train_emb, y_train = compute_infograph_embeddings(model, train_eval_loader, device=device, tag="embed infograph train")
+    test_emb, y_test = compute_infograph_embeddings(model, test_loader, device=device, tag="embed infograph test")
+
+    if len(np.unique(y_train)) < 2:
+        raise RuntimeError("InfoGraph logistic regression needs both classes in the train split.")
+    classifier = LogisticRegression(class_weight="balanced", max_iter=1000, random_state=seed)
+    classifier.fit(train_emb, y_train)
+    y_pred = classifier.predict(test_emb)
+    if hasattr(classifier, "predict_proba"):
+        y_score = classifier.predict_proba(test_emb)[:, 1]
+    else:
+        y_score = classifier.decision_function(test_emb)
+    return {
+        "accuracy": float(accuracy_score(y_test, y_pred)),
+        "precision": float(precision_score(y_test, y_pred, zero_division=0)),
+        "recall": float(recall_score(y_test, y_pred, zero_division=0)),
+        "f1": float(f1_score(y_test, y_pred, zero_division=0)),
+        "auroc": safe_auc(y_test, y_score),
+        "auprc": safe_auprc(y_test, y_score),
+    }
 
 
 # =========================================================
@@ -554,6 +740,79 @@ def train_topogcl_scores(
     return torch.norm(eval_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32)
 
 
+class GraphSAGEEncoder(torch.nn.Module):
+    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int) -> None:
+        super().__init__()
+        self.self1 = torch.nn.Linear(in_dim, hidden_dim)
+        self.neigh1 = torch.nn.Linear(in_dim, hidden_dim)
+        self.self2 = torch.nn.Linear(hidden_dim, out_dim)
+        self.neigh2 = torch.nn.Linear(hidden_dim, out_dim)
+        self.output_dim = out_dim
+
+    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+        h = torch.relu(self.self1(x) + self.neigh1(torch.sparse.mm(adj, x)))
+        h = torch.relu(self.self2(h) + self.neigh2(torch.sparse.mm(adj, h)))
+        return h.mean(dim=0)
+
+
+class GraphClassifier(torch.nn.Module):
+    def __init__(self, encoder: torch.nn.Module, emb_dim: int) -> None:
+        super().__init__()
+        self.encoder = encoder
+        self.head = torch.nn.Linear(emb_dim, 2)
+
+    def forward(self, graph: GraphWindow, device: torch.device) -> torch.Tensor:
+        adj = build_sparse_a_hat_from_undirected(graph.num_nodes, graph.edges_undirected).to(device)
+        z = self.encoder(graph.x.to(device), adj)
+        return self.head(z)
+
+
+def train_supervised_graph_model(
+    model_name: str,
+    encoder_factory: Callable[[], torch.nn.Module],
+    train_graphs: List[GraphWindow],
+    hidden_dim: int,
+    epochs: int,
+    lr: float,
+    seed: int,
+    device: torch.device,
+) -> GraphClassifier:
+    torch.manual_seed(seed)
+    rng = random.Random(seed)
+    classifier = GraphClassifier(encoder_factory(), emb_dim=hidden_dim).to(device)
+    optimizer = torch.optim.Adam(classifier.parameters(), lr=lr)
+
+    for epoch in range(epochs):
+        classifier.train()
+        shuffled = train_graphs[:]
+        rng.shuffle(shuffled)
+        total_loss = 0.0
+        for graph in shuffled:
+            logits = classifier(graph, device).unsqueeze(0)
+            target = torch.tensor([graph.label], dtype=torch.long, device=device)
+            loss = torch.nn.functional.cross_entropy(logits, target)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += float(loss.item())
+        print(f"    {model_name} epoch {epoch + 1}/{epochs} loss={total_loss / max(len(shuffled), 1):.6f}", flush=True)
+    return classifier
+
+
+def predict_supervised_graph_model(
+    classifier: GraphClassifier,
+    eval_graphs: List[GraphWindow],
+    device: torch.device,
+) -> np.ndarray:
+    classifier.eval()
+    scores: List[float] = []
+    with torch.no_grad():
+        for graph in eval_graphs:
+            logits = classifier(graph, device)
+            scores.append(float(torch.softmax(logits, dim=0)[1].item()))
+    return np.array(scores, dtype=np.float32)
+
+
 # =========================================================
 # Metrics, thresholds, and result writing
 # =========================================================
@@ -693,24 +952,6 @@ def run_external_command(model_name: str, command: List[str], workdir: Path) -> 
     return parse_external_metrics(completed.stdout)
 
 
-def run_infograph_external(config: ExperimentConfig, seed: int) -> Dict[str, float]:
-    dataset_name = normalize_external_dataset_name(config.dataset)
-    return run_external_command(
-        model_name="infograph",
-        command=[
-            "python",
-            "main.py",
-            "--DS",
-            dataset_name,
-            "--lr",
-            str(config.lr_infograph),
-            "--num-gc-layers",
-            str(config.infograph_layers),
-        ],
-        workdir=config.infograph_dir,
-    )
-
-
 def run_rgcl_external(config: ExperimentConfig, seed: int) -> Dict[str, float]:
     dataset_name = normalize_external_dataset_name(config.dataset)
     return run_external_command(
@@ -730,6 +971,26 @@ def model_runner(
     seed: int,
     device: torch.device,
 ) -> Tuple[np.ndarray, np.ndarray] | Dict[str, float]:
+    if model_name in {"gnn", "graphsage"}:
+        if model_name == "gnn":
+            factory = lambda: GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.hidden_dim)
+        else:
+            factory = lambda: GraphSAGEEncoder(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.hidden_dim)
+        classifier = train_supervised_graph_model(
+            model_name=model_name,
+            encoder_factory=factory,
+            train_graphs=train_graphs,
+            hidden_dim=config.hidden_dim,
+            epochs=config.epochs_topogcl,
+            lr=config.lr_topogcl,
+            seed=seed,
+            device=device,
+        )
+        return (
+            predict_supervised_graph_model(classifier, val_graphs, device),
+            predict_supervised_graph_model(classifier, test_graphs, device),
+        )
+
     if model_name == "graphcl":
         encoder = train_graphcl_encoder(
             train_graphs=train_graphs,
@@ -773,8 +1034,14 @@ def model_runner(
         )
 
     if model_name == "infograph":
-        metrics = run_infograph_external(config=config, seed=seed)
-        return metrics
+        return train_infograph_ids(
+            train_graphs=train_graphs,
+            test_graphs=test_graphs,
+            in_dim=in_dim,
+            config=config,
+            seed=seed,
+            device=device,
+        )
 
     if model_name == "rgcl":
         metrics = run_rgcl_external(config=config, seed=seed)
@@ -877,6 +1144,7 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
             "models": list(config.models),
             "epochs_graphcl": config.epochs_graphcl,
             "epochs_topogcl": config.epochs_topogcl,
+            "epochs_infograph": config.epochs_infograph,
             "lr_graphcl": config.lr_graphcl,
             "lr_topogcl": config.lr_topogcl,
             "lr_infograph": config.lr_infograph,
@@ -934,9 +1202,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-ratios", default="0.25")
     parser.add_argument("--val-ratio", type=float, default=0.15)
     parser.add_argument("--seeds", default="42,43,44")
-    parser.add_argument("--models", default="graphcl,topogcl,infograph,rgcl", help="Comma-separated graph models: graphcl,topogcl,infograph,rgcl")
+    parser.add_argument("--models", default="graphcl,topogcl,infograph,rgcl", help="Comma-separated graph models: gnn,graphsage,graphcl,topogcl,infograph,rgcl")
     parser.add_argument("--epochs-graphcl", type=int, default=10)
     parser.add_argument("--epochs-topogcl", type=int, default=10)
+    parser.add_argument("--epochs-infograph", type=int, default=25)
     parser.add_argument("--lr-graphcl", type=float, default=1e-3)
     parser.add_argument("--lr-topogcl", type=float, default=1e-3)
     parser.add_argument("--lr-infograph", type=float, default=1e-3)
@@ -960,7 +1229,7 @@ def parse_args() -> argparse.Namespace:
 
 def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
     models = tuple(model.strip().lower() for model in args.models.split(",") if model.strip())
-    allowed = {"graphcl", "topogcl", "infograph", "rgcl"}
+    allowed = {"gnn", "graphsage", "graphcl", "topogcl", "infograph", "rgcl"}
     unknown = set(models) - allowed
     if unknown:
         raise ValueError(f"Unknown models {sorted(unknown)}; allowed models are {sorted(allowed)}")
@@ -974,6 +1243,7 @@ def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
         seeds=parse_int_tuple(args.seeds),
         epochs_graphcl=args.epochs_graphcl,
         epochs_topogcl=args.epochs_topogcl,
+        epochs_infograph=args.epochs_infograph,
         lr_graphcl=args.lr_graphcl,
         lr_topogcl=args.lr_topogcl,
         lr_infograph=args.lr_infograph,
