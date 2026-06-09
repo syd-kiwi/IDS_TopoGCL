@@ -4,10 +4,12 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import random
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -61,12 +63,14 @@ class ExperimentConfig:
     train_ratios: Tuple[float, ...]
     val_ratio: float
     seeds: Tuple[int, ...]
-    epochs_supervised: int
     epochs_graphcl: int
     epochs_topogcl: int
-    lr_supervised: float
     lr_graphcl: float
     lr_topogcl: float
+    lr_infograph: float
+    infograph_layers: int
+    infograph_dir: Path
+    rgcl_dir: Path
     hidden_dim: int
     emb_dim: int
     graphcl_layers: int
@@ -280,6 +284,8 @@ def build_sparse_a_hat_from_undirected(
 
 
 class GCN(torch.nn.Module):
+    """Small GCN encoder retained for TopoGCL embeddings."""
+
     def __init__(self, in_dim: int, hidden_dim: int, out_dim: int) -> None:
         super().__init__()
         self.w1 = torch.nn.Linear(in_dim, hidden_dim)
@@ -290,82 +296,6 @@ class GCN(torch.nn.Module):
         h = torch.relu(torch.sparse.mm(a_hat, self.w1(x)))
         h = torch.sparse.mm(a_hat, self.w2(h))
         return h.mean(dim=0)
-
-
-class GraphSAGEEncoder(torch.nn.Module):
-    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int) -> None:
-        super().__init__()
-        self.self1 = torch.nn.Linear(in_dim, hidden_dim)
-        self.neigh1 = torch.nn.Linear(in_dim, hidden_dim)
-        self.self2 = torch.nn.Linear(hidden_dim, out_dim)
-        self.neigh2 = torch.nn.Linear(hidden_dim, out_dim)
-        self.output_dim = out_dim
-
-    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        h = torch.relu(self.self1(x) + self.neigh1(torch.sparse.mm(adj, x)))
-        h = torch.relu(self.self2(h) + self.neigh2(torch.sparse.mm(adj, h)))
-        return h.mean(dim=0)
-
-
-class GraphClassifier(torch.nn.Module):
-    def __init__(self, encoder: torch.nn.Module, emb_dim: int) -> None:
-        super().__init__()
-        self.encoder = encoder
-        self.head = torch.nn.Linear(emb_dim, 2)
-
-    def forward(self, graph: GraphWindow, device: torch.device) -> torch.Tensor:
-        adj = build_sparse_a_hat_from_undirected(graph.num_nodes, graph.edges_undirected).to(device)
-        z = self.encoder(graph.x.to(device), adj)
-        return self.head(z)
-
-
-# =========================================================
-# Supervised GNN and GraphSAGE training
-# =========================================================
-def predict_supervised_graph_model(
-    classifier: GraphClassifier,
-    eval_graphs: List[GraphWindow],
-    device: torch.device,
-) -> np.ndarray:
-    classifier.eval()
-    scores: List[float] = []
-    with torch.no_grad():
-        for graph in eval_graphs:
-            logits = classifier(graph, device)
-            scores.append(float(torch.softmax(logits, dim=0)[1].item()))
-    return np.array(scores, dtype=np.float32)
-
-
-def train_supervised_graph_model(
-    model_name: str,
-    encoder_factory: Callable[[], torch.nn.Module],
-    train_graphs: List[GraphWindow],
-    hidden_dim: int,
-    epochs: int,
-    lr: float,
-    seed: int,
-    device: torch.device,
-) -> GraphClassifier:
-    torch.manual_seed(seed)
-    rng = random.Random(seed)
-    classifier = GraphClassifier(encoder_factory(), emb_dim=hidden_dim).to(device)
-    optimizer = torch.optim.Adam(classifier.parameters(), lr=lr)
-
-    for epoch in range(epochs):
-        classifier.train()
-        shuffled = train_graphs[:]
-        rng.shuffle(shuffled)
-        total_loss = 0.0
-        for graph in shuffled:
-            logits = classifier(graph, device).unsqueeze(0)
-            target = torch.tensor([graph.label], dtype=torch.long, device=device)
-            loss = torch.nn.functional.cross_entropy(logits, target)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += float(loss.item())
-        print(f"    {model_name} epoch {epoch + 1}/{epochs} loss={total_loss / max(len(shuffled), 1):.6f}", flush=True)
-    return classifier
 
 
 # =========================================================
@@ -706,6 +636,90 @@ def write_summary_csv(path: Path, rows: List[Dict[str, object]], append: bool) -
             writer.writerow({field: row.get(field, "") for field in CSV_FIELDNAMES})
 
 
+EXTERNAL_METRIC_PATTERNS = {
+    "accuracy": ("accuracy", "acc"),
+    "precision": ("precision", "prec"),
+    "recall": ("recall", "rec"),
+    "f1": ("f1", "f1_score", "f1-score"),
+    "auroc": ("auroc", "roc_auc", "roc-auc", "auc"),
+    "auprc": ("auprc", "average_precision", "avg_precision", "ap"),
+}
+
+
+def normalize_external_dataset_name(dataset: str) -> str:
+    """Map display names to TU-style dataset identifiers accepted by external repos."""
+    return (
+        dataset.replace("NF-", "NF_")
+        .replace("-", "_")
+        .replace(" ", "_")
+        .replace("%", "")
+    )
+
+
+def parse_external_metrics(output: str) -> Dict[str, float]:
+    metrics: Dict[str, float] = {}
+    for canonical, aliases in EXTERNAL_METRIC_PATTERNS.items():
+        matches: List[float] = []
+        for alias in aliases:
+            pattern = rf"(?i)(?:^|[^a-z0-9_]){re.escape(alias)}(?:[^a-z0-9_]|$)\s*[:=,\t ]+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
+            matches.extend(float(match) for match in re.findall(pattern, output))
+        if matches:
+            value = matches[-1]
+            metrics[canonical] = value / 100.0 if value > 1.0 and value <= 100.0 else value
+    missing = [name for name in METRIC_NAMES if name not in metrics]
+    if missing:
+        raise RuntimeError(
+            "Could not parse external metrics "
+            f"{missing}. Expected keys like accuracy, precision, recall, f1, auroc, and auprc in output."
+        )
+    return metrics
+
+
+def run_external_command(model_name: str, command: List[str], workdir: Path) -> Dict[str, float]:
+    if not workdir.exists():
+        raise FileNotFoundError(f"{model_name} directory not found: {workdir}")
+    print(f"    running {model_name}: {' '.join(command)} (cwd={workdir})", flush=True)
+    completed = subprocess.run(
+        command,
+        cwd=workdir,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    print(completed.stdout, flush=True)
+    if completed.returncode != 0:
+        raise RuntimeError(f"{model_name} command failed with exit code {completed.returncode}")
+    return parse_external_metrics(completed.stdout)
+
+
+def run_infograph_external(config: ExperimentConfig, seed: int) -> Dict[str, float]:
+    dataset_name = normalize_external_dataset_name(config.dataset)
+    return run_external_command(
+        model_name="infograph",
+        command=[
+            "python",
+            "main.py",
+            "--DS",
+            dataset_name,
+            "--lr",
+            str(config.lr_infograph),
+            "--num-gc-layers",
+            str(config.infograph_layers),
+        ],
+        workdir=config.infograph_dir,
+    )
+
+
+def run_rgcl_external(config: ExperimentConfig, seed: int) -> Dict[str, float]:
+    dataset_name = normalize_external_dataset_name(config.dataset)
+    return run_external_command(
+        model_name="rgcl",
+        command=["python", "rgcl.py", "--seed", str(seed), "--DS", dataset_name],
+        workdir=config.rgcl_dir,
+    )
+
+
 def model_runner(
     model_name: str,
     train_graphs: List[GraphWindow],
@@ -715,41 +729,7 @@ def model_runner(
     config: ExperimentConfig,
     seed: int,
     device: torch.device,
-) -> Tuple[np.ndarray, np.ndarray]:
-    if model_name == "gnn":
-        factory = lambda: GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.hidden_dim)
-        classifier = train_supervised_graph_model(
-            model_name="gnn",
-            encoder_factory=factory,
-            train_graphs=train_graphs,
-            hidden_dim=config.hidden_dim,
-            epochs=config.epochs_supervised,
-            lr=config.lr_supervised,
-            seed=seed,
-            device=device,
-        )
-        return (
-            predict_supervised_graph_model(classifier, val_graphs, device),
-            predict_supervised_graph_model(classifier, test_graphs, device),
-        )
-
-    if model_name == "graphsage":
-        factory = lambda: GraphSAGEEncoder(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.hidden_dim)
-        classifier = train_supervised_graph_model(
-            model_name="graphsage",
-            encoder_factory=factory,
-            train_graphs=train_graphs,
-            hidden_dim=config.hidden_dim,
-            epochs=config.epochs_supervised,
-            lr=config.lr_supervised,
-            seed=seed,
-            device=device,
-        )
-        return (
-            predict_supervised_graph_model(classifier, val_graphs, device),
-            predict_supervised_graph_model(classifier, test_graphs, device),
-        )
-
+) -> Tuple[np.ndarray, np.ndarray] | Dict[str, float]:
     if model_name == "graphcl":
         encoder = train_graphcl_encoder(
             train_graphs=train_graphs,
@@ -791,6 +771,14 @@ def model_runner(
             torch.norm(val_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32),
             torch.norm(test_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32),
         )
+
+    if model_name == "infograph":
+        metrics = run_infograph_external(config=config, seed=seed)
+        return metrics
+
+    if model_name == "rgcl":
+        metrics = run_rgcl_external(config=config, seed=seed)
+        return metrics
 
     raise ValueError(f"Unknown graph model: {model_name}")
 
@@ -854,7 +842,7 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
 
             for model_name in config.models:
                 print(f"[MODEL] dataset={config.dataset} train_ratio={train_ratio} model={model_name}", flush=True)
-                val_scores, test_scores = model_runner(
+                result = model_runner(
                     model_name=model_name,
                     train_graphs=train_graphs,
                     val_graphs=val_graphs,
@@ -864,9 +852,13 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
                     seed=seed,
                     device=device,
                 )
-                threshold = best_threshold_from_validation(y_val, val_scores)
-                metrics = compute_metrics(y_test, test_scores, threshold=threshold)
-                metrics["threshold"] = threshold
+                if isinstance(result, dict):
+                    metrics = result
+                else:
+                    val_scores, test_scores = result
+                    threshold = best_threshold_from_validation(y_val, val_scores)
+                    metrics = compute_metrics(y_test, test_scores, threshold=threshold)
+                    metrics["threshold"] = threshold
                 per_model_metrics[model_name].append(metrics)
 
         for model_name, metrics_list in per_model_metrics.items():
@@ -883,12 +875,14 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
         "runs_by_train_ratio": all_details,
         "training": {
             "models": list(config.models),
-            "epochs_supervised": config.epochs_supervised,
             "epochs_graphcl": config.epochs_graphcl,
             "epochs_topogcl": config.epochs_topogcl,
-            "lr_supervised": config.lr_supervised,
             "lr_graphcl": config.lr_graphcl,
             "lr_topogcl": config.lr_topogcl,
+            "lr_infograph": config.lr_infograph,
+            "infograph_layers": config.infograph_layers,
+            "infograph_dir": str(config.infograph_dir),
+            "rgcl_dir": str(config.rgcl_dir),
             "hidden_dim": config.hidden_dim,
             "emb_dim": config.emb_dim,
             "graphcl_layers": config.graphcl_layers,
@@ -940,13 +934,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-ratios", default="0.25")
     parser.add_argument("--val-ratio", type=float, default=0.15)
     parser.add_argument("--seeds", default="42,43,44")
-    parser.add_argument("--models", default="gnn,graphsage,graphcl,topogcl", help="Comma-separated graph models: gnn,graphsage,graphcl,topogcl")
-    parser.add_argument("--epochs-supervised", type=int, default=10)
+    parser.add_argument("--models", default="graphcl,topogcl,infograph,rgcl", help="Comma-separated graph models: graphcl,topogcl,infograph,rgcl")
     parser.add_argument("--epochs-graphcl", type=int, default=10)
     parser.add_argument("--epochs-topogcl", type=int, default=10)
-    parser.add_argument("--lr-supervised", type=float, default=1e-3)
     parser.add_argument("--lr-graphcl", type=float, default=1e-3)
     parser.add_argument("--lr-topogcl", type=float, default=1e-3)
+    parser.add_argument("--lr-infograph", type=float, default=1e-3)
+    parser.add_argument("--infograph-layers", type=int, default=3)
+    parser.add_argument("--infograph-dir", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/InfoGraph/unsupervised"))
+    parser.add_argument("--rgcl-dir", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/RGCL/unsupervised_TU"))
     parser.add_argument("--hidden-dim", type=int, default=16)
     parser.add_argument("--emb-dim", type=int, default=16)
     parser.add_argument("--graphcl-layers", type=int, default=16)
@@ -964,7 +960,7 @@ def parse_args() -> argparse.Namespace:
 
 def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
     models = tuple(model.strip().lower() for model in args.models.split(",") if model.strip())
-    allowed = {"gnn", "graphsage", "graphcl", "topogcl"}
+    allowed = {"graphcl", "topogcl", "infograph", "rgcl"}
     unknown = set(models) - allowed
     if unknown:
         raise ValueError(f"Unknown models {sorted(unknown)}; allowed models are {sorted(allowed)}")
@@ -976,12 +972,14 @@ def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
         train_ratios=parse_float_tuple(args.train_ratios),
         val_ratio=args.val_ratio,
         seeds=parse_int_tuple(args.seeds),
-        epochs_supervised=args.epochs_supervised,
         epochs_graphcl=args.epochs_graphcl,
         epochs_topogcl=args.epochs_topogcl,
-        lr_supervised=args.lr_supervised,
         lr_graphcl=args.lr_graphcl,
         lr_topogcl=args.lr_topogcl,
+        lr_infograph=args.lr_infograph,
+        infograph_layers=args.infograph_layers,
+        infograph_dir=args.infograph_dir,
+        rgcl_dir=args.rgcl_dir,
         hidden_dim=args.hidden_dim,
         emb_dim=args.emb_dim,
         graphcl_layers=args.graphcl_layers,
