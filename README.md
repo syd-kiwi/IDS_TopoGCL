@@ -7,7 +7,7 @@ This folder contains a compact, reproducible workflow for graph-based intrusion 
 - `scripts/build_ids_graph_classification_dataset.py`  
   Builds graph classification datasets from tabular IDS data.
 - `scripts/train_ids_binary.py`
-  Trains GNN, GraphSAGE, GraphCL, TopoGCL, and internal InfoGraph baselines, and can still launch RGCL when selected, then writes the same JSON and summary CSV format.
+  Trains GraphCL/TopoGCL and launches external InfoGraph/RGCL baselines, then writes the same JSON and summary CSV format.
 - `scripts/train_ids_supervised_baselines.py`
   Trains the supervised GNN and GraphSAGE baselines separately from the unsupervised binary IDS pipeline.
 - `requirements.txt`  
@@ -53,14 +53,17 @@ Typical usage:
 python scripts/train_ids_binary.py
 ```
 
-InfoGraph is implemented internally for the local IDS `.npz` graph datasets and does not use `TUDataset` or download TU archives. If `rgcl` is selected, RGCL is launched from the external repository supplied with `--rgcl-dir`; by default, the command is equivalent to:
+InfoGraph and RGCL are launched from the external repositories supplied with `--infograph-dir` and `--rgcl-dir`. By default, the commands are equivalent to:
 
 ```bash
+cd /home/kiwi-pandas/Documents/IDS_TopoGCL/InfoGraph/unsupervised
+python main.py --DS DATASET_NAME --lr 0.001 --num-gc-layers 3
+
 cd /home/kiwi-pandas/Documents/IDS_TopoGCL/RGCL/unsupervised_TU
 python rgcl.py --seed $seed --DS $dataset
 ```
 
-To run only the supervised baselines separately:
+To run the removed supervised baselines separately:
 
 ```bash
 python scripts/train_ids_supervised_baselines.py
