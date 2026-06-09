@@ -3,7 +3,7 @@ import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -54,25 +54,14 @@ FIXED_NODE_FEATURES = [
     "total_flow_count",
 ]
 
-CLEAN_MIN_EDGES = 1
-MALICIOUS_MIN_EDGES = 5
+BENIGN_MIN_EDGES = 1
+ATTACK_MIN_EDGES = 5
 MAX_EDGES = 3000
-MIN_CLEAN_GRAPHS = 250
-MAX_CLEAN_GRAPHS = 25000
-MIN_MALICIOUS_GRAPHS = 250
-MAX_MALICIOUS_GRAPHS = 25000
-MIN_PARTIALLY_MALICIOUS_GRAPHS = 250
-MAX_PARTIALLY_MALICIOUS_GRAPHS = 25000
-CHUNK_SIZE = 500
-
-LABEL_CLEAN = 0
-LABEL_MALICIOUS = 1
-LABEL_PARTIALLY_MALICIOUS = 2
-LABEL_NAMES: Dict[int, str] = {
-    LABEL_CLEAN: "clean",
-    LABEL_MALICIOUS: "malicious",
-    LABEL_PARTIALLY_MALICIOUS: "partially_malicious",
-}
+MIN_BENIGN_GRAPHS = 250
+MAX_BENIGN_GRAPHS = 25000
+MIN_ATTACK_GRAPHS = 250
+MAX_ATTACK_GRAPHS = 25000
+CHUNK_SIZE = 50000
 
 
 @dataclass
@@ -84,7 +73,6 @@ class GraphSample:
     edge_index: np.ndarray
     edge_features: np.ndarray
     graph_label: int
-    graph_label_name: str
     attack_type: str
     num_benign_flows: int
     num_attack_flows: int
@@ -180,16 +168,10 @@ def build_window_graph(
     attack_flags = dfw[label_col].map(infer_attack).to_numpy(dtype=np.int32)
     num_attack = int(attack_flags.sum())
     num_benign = int(len(attack_flags) - num_attack)
-    if num_attack == 0:
-        graph_label = LABEL_CLEAN
-    elif num_benign == 0:
-        graph_label = LABEL_MALICIOUS
-    else:
-        graph_label = LABEL_PARTIALLY_MALICIOUS
-    graph_label_name = LABEL_NAMES[graph_label]
+    graph_label = 1 if num_attack > 0 else 0
 
     attack_type = "benign"
-    if graph_label != LABEL_CLEAN:
+    if graph_label == 1:
         if attack_type_col and attack_type_col in dfw.columns:
             sub = dfw.loc[attack_flags == 1, attack_type_col].astype(str)
             attack_type = sub.mode().iloc[0] if not sub.empty else "attack"
@@ -204,7 +186,6 @@ def build_window_graph(
         edge_index=edge_index,
         edge_features=edge_features,
         graph_label=graph_label,
-        graph_label_name=graph_label_name,
         attack_type=attack_type,
         num_benign_flows=num_benign,
         num_attack_flows=num_attack,
@@ -237,42 +218,6 @@ def apply_edge_limits(sample: GraphSample, min_edges: int, max_edges: int) -> Op
     return sample
 
 
-def validate_window_label(sample: GraphSample) -> None:
-    if sample.num_attack_flows == 0:
-        expected_label = LABEL_CLEAN
-    elif sample.num_benign_flows == 0:
-        expected_label = LABEL_MALICIOUS
-    else:
-        expected_label = LABEL_PARTIALLY_MALICIOUS
-    assert sample.graph_label == expected_label
-    assert sample.graph_label_name == LABEL_NAMES[expected_label]
-
-
-def min_edges_for_label(graph_label: int) -> int:
-    return CLEAN_MIN_EDGES if graph_label == LABEL_CLEAN else MALICIOUS_MIN_EDGES
-
-
-def can_save_label(graph_label: int, label_counts: Dict[int, int]) -> bool:
-    max_graphs_by_label = {
-        LABEL_CLEAN: MAX_CLEAN_GRAPHS,
-        LABEL_MALICIOUS: MAX_MALICIOUS_GRAPHS,
-        LABEL_PARTIALLY_MALICIOUS: MAX_PARTIALLY_MALICIOUS_GRAPHS,
-    }
-    return label_counts[graph_label] < max_graphs_by_label[graph_label]
-
-
-def all_label_caps_reached(label_counts: Dict[int, int]) -> bool:
-    return (
-        label_counts[LABEL_CLEAN] >= MAX_CLEAN_GRAPHS
-        and label_counts[LABEL_MALICIOUS] >= MAX_MALICIOUS_GRAPHS
-        and label_counts[LABEL_PARTIALLY_MALICIOUS] >= MAX_PARTIALLY_MALICIOUS_GRAPHS
-    )
-
-
-def format_label_counts(label_counts: Dict[int, int]) -> str:
-    return ", ".join(f"{LABEL_NAMES[label]}={label_counts[label]}" for label in sorted(LABEL_NAMES))
-
-
 def save_graph_npz(sample: GraphSample, out_dir: Path) -> None:
     np.savez_compressed(
         out_dir / f"graph_{sample.graph_id:06d}.npz",
@@ -280,7 +225,6 @@ def save_graph_npz(sample: GraphSample, out_dir: Path) -> None:
         edge_index=sample.edge_index,
         edge_features=sample.edge_features,
         label=np.array([sample.graph_label], dtype=np.int64),
-        label_name=np.array([sample.graph_label_name], dtype=np.str_),
         attack_type=np.array([sample.attack_type], dtype=np.str_),
     )
 
@@ -299,7 +243,6 @@ def append_summary_row(summary_path: Path, sample: GraphSample) -> None:
                 "num_benign_flows",
                 "num_attack_flows",
                 "graph_label",
-                "graph_label_name",
                 "attack_type",
             ],
         )
@@ -315,7 +258,6 @@ def append_summary_row(summary_path: Path, sample: GraphSample) -> None:
                 "num_benign_flows": sample.num_benign_flows,
                 "num_attack_flows": sample.num_attack_flows,
                 "graph_label": sample.graph_label,
-                "graph_label_name": sample.graph_label_name,
                 "attack_type": sample.attack_type,
             }
         )
@@ -340,11 +282,11 @@ def normalize_chunk(
 
 
 def main() -> None:
-    #input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/NF-ToN-IoT-v3.csv"
-    #utput_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph"
-    input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
-    output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph"
-    window_seconds = 15
+    input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/NF-ToN-IoT-v3.csv"
+    output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph"
+    #nput_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
+    #output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph"
+    window_seconds = 60
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -373,7 +315,8 @@ def main() -> None:
     carry_window_df = pd.DataFrame()
     total_rows_read = 0
     graph_count = 0
-    label_counts = {label: 0 for label in LABEL_NAMES}
+    benign_count = 0
+    attack_count = 0
 
     chunk_iter = pd.read_csv(input_csv, chunksize=CHUNK_SIZE)
 
@@ -382,7 +325,7 @@ def main() -> None:
             total_rows_read += len(chunk)
             if total_rows_read % 50000 == 0:
                 print(
-                    f"rows processed={total_rows_read} graphs found=({format_label_counts(label_counts)})",
+                    f"rows processed={total_rows_read} benign graphs found={benign_count} attack graphs found={attack_count}",
                     flush=True,
                 )
 
@@ -402,18 +345,24 @@ def main() -> None:
 
             if not complete_df.empty:
                 for _, gdf in complete_df.groupby("__window", sort=True):
-                    sample = build_window_graph(
-                        gdf, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols
-                    )
-                    validate_window_label(sample)
+                    sample = build_window_graph(gdf, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
+                    assert sample.graph_label == (1 if sample.num_attack_flows > 0 else 0)
+                    if sample.graph_label == 0 and sample.num_attack_flows != 0:
+                        continue
+                    if sample.graph_label == 1 and sample.num_attack_flows <= 0:
+                        continue
 
-                    min_edges = min_edges_for_label(sample.graph_label)
+                    min_edges = ATTACK_MIN_EDGES if sample.graph_label == 1 else BENIGN_MIN_EDGES
                     sample = apply_edge_limits(sample, min_edges, MAX_EDGES)
                     if sample is None:
                         continue
 
-                    if not can_save_label(sample.graph_label, label_counts):
-                        continue
+                    if sample.graph_label == 0:
+                        if benign_count >= MAX_BENIGN_GRAPHS:
+                            continue
+                    else:
+                        if attack_count >= MAX_ATTACK_GRAPHS:
+                            continue
 
                     assert_graph_shapes(sample)
                     save_graph_npz(sample, out_dir)
@@ -423,28 +372,37 @@ def main() -> None:
                     assert sample.edge_features.shape[1] == 9
                     append_summary_row(summary_path, sample)
                     graph_count += 1
-                    label_counts[sample.graph_label] += 1
+                    if sample.graph_label == 0:
+                        benign_count += 1
+                    else:
+                        attack_count += 1
 
-            if all_label_caps_reached(label_counts):
+            if benign_count >= MAX_BENIGN_GRAPHS and attack_count >= MAX_ATTACK_GRAPHS:
                 break
 
         if not carry_window_df.empty:
-            sample = build_window_graph(
-                carry_window_df, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols
-            )
-            validate_window_label(sample)
-            min_edges = min_edges_for_label(sample.graph_label)
-            sample = apply_edge_limits(sample, min_edges, MAX_EDGES)
-            if sample is not None and can_save_label(sample.graph_label, label_counts):
-                assert_graph_shapes(sample)
-                save_graph_npz(sample, out_dir)
-                assert sample.edge_index.shape[1] >= min_edges
-                assert sample.edge_index.shape[1] <= MAX_EDGES
-                assert sample.node_features.shape[1] == 8
-                assert sample.edge_features.shape[1] == 9
-                append_summary_row(summary_path, sample)
-                graph_count += 1
-                label_counts[sample.graph_label] += 1
+            sample = build_window_graph(carry_window_df, graph_count, src_col, dst_col, proto_col, label_col, attack_type_col, edge_feat_cols)
+            assert sample.graph_label == (1 if sample.num_attack_flows > 0 else 0)
+            if (sample.graph_label == 0 and sample.num_attack_flows == 0) or (sample.graph_label == 1 and sample.num_attack_flows > 0):
+                min_edges = ATTACK_MIN_EDGES if sample.graph_label == 1 else BENIGN_MIN_EDGES
+                sample = apply_edge_limits(sample, min_edges, MAX_EDGES)
+                if sample is not None:
+                    can_save = (sample.graph_label == 0 and benign_count < MAX_BENIGN_GRAPHS) or (
+                        sample.graph_label == 1 and attack_count < MAX_ATTACK_GRAPHS
+                    )
+                    if can_save:
+                        assert_graph_shapes(sample)
+                        save_graph_npz(sample, out_dir)
+                        assert sample.edge_index.shape[1] >= min_edges
+                        assert sample.edge_index.shape[1] <= MAX_EDGES
+                        assert sample.node_features.shape[1] == 8
+                        assert sample.edge_features.shape[1] == 9
+                        append_summary_row(summary_path, sample)
+                        graph_count += 1
+                        if sample.graph_label == 0:
+                            benign_count += 1
+                        else:
+                            attack_count += 1
 
     except Exception as exc:
         print(
@@ -462,24 +420,17 @@ def main() -> None:
                 "input_csv": input_csv,
                 "window_seconds": window_seconds,
                 "chunk_size": CHUNK_SIZE,
-                "label_names": LABEL_NAMES,
-                "class_counts": {
-                    LABEL_NAMES[label]: count for label, count in label_counts.items()
-                },
-                "min_clean_graphs": MIN_CLEAN_GRAPHS,
-                "min_malicious_graphs": MIN_MALICIOUS_GRAPHS,
-                "min_partially_malicious_graphs": MIN_PARTIALLY_MALICIOUS_GRAPHS,
-                "max_clean_graphs": MAX_CLEAN_GRAPHS,
-                "max_malicious_graphs": MAX_MALICIOUS_GRAPHS,
-                "max_partially_malicious_graphs": MAX_PARTIALLY_MALICIOUS_GRAPHS,
-                "clean_min_edges": CLEAN_MIN_EDGES,
-                "malicious_min_edges": MALICIOUS_MIN_EDGES,
-                "partially_malicious_min_edges": MALICIOUS_MIN_EDGES,
+                "min_benign_graphs": MIN_BENIGN_GRAPHS,
+                "min_attack_graphs": MIN_ATTACK_GRAPHS,
+                "max_benign_graphs": MAX_BENIGN_GRAPHS,
+                "max_attack_graphs": MAX_ATTACK_GRAPHS,
+                "benign_min_edges": BENIGN_MIN_EDGES,
+                "attack_min_edges": ATTACK_MIN_EDGES,
             },
             f,
             indent=2,
         )
-    print(f"wrote {graph_count} graph samples to {out_dir} ({format_label_counts(label_counts)})")
+    print(f"wrote {graph_count} graph samples to {out_dir} (benign={benign_count}, attack={attack_count})")
 
 
 if __name__ == "__main__":
