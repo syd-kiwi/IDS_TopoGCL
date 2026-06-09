@@ -954,9 +954,16 @@ def run_external_command(model_name: str, command: List[str], workdir: Path) -> 
 
 def run_rgcl_external(config: ExperimentConfig, seed: int) -> Dict[str, float]:
     dataset_name = normalize_external_dataset_name(config.dataset)
+    command = ["python", "rgcl.py", "--seed", str(seed), "--DS", dataset_name]
+    dataset_key = dataset_name.lower()
+    if dataset_key in {"nf_ton_iot", "nf_bot_iot"}:
+        command.extend(["--graph-dir", str(config.graph_dir)])
+        print(f"    RGCL source: local .npz graphs ({config.graph_dir})", flush=True)
+    else:
+        print(f"    RGCL source: TU dataset ({dataset_name})", flush=True)
     return run_external_command(
         model_name="rgcl",
-        command=["python", "rgcl.py", "--seed", str(seed), "--DS", dataset_name],
+        command=command,
         workdir=config.rgcl_dir,
     )
 
