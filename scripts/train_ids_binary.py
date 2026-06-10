@@ -46,6 +46,17 @@ CSV_FIELDNAMES = [
     "auprc_std",
 ]
 METRIC_NAMES = ["accuracy", "precision", "recall", "f1", "auroc", "auprc"]
+SCORE_CSV_FIELDNAMES = [
+    "dataset",
+    "train_ratio",
+    "seed",
+    "model",
+    "index",
+    "val_score",
+    "y_val",
+    "test_score",
+    "y_test",
+]
 
 
 @dataclass
@@ -72,6 +83,7 @@ class ExperimentConfig:
     graph_dir: Path
     out_json: Path
     out_csv: Path
+    out_scores_csv: Path
     train_ratios: Tuple[float, ...]
     val_ratio: float
     seeds: Tuple[int, ...]
@@ -950,6 +962,72 @@ def write_summary_csv(path: Path, rows: List[Dict[str, object]], append: bool) -
             writer.writerow({field: row.get(field, "") for field in CSV_FIELDNAMES})
 
 
+def make_score_rows(
+    dataset: str,
+    train_ratio: float,
+    seed: int,
+    model_name: str,
+    val_scores: np.ndarray,
+    test_scores: np.ndarray,
+    y_val: np.ndarray,
+    y_test: np.ndarray,
+) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    max_len = max(len(val_scores), len(test_scores), len(y_val), len(y_test))
+    for idx in range(max_len):
+        rows.append(
+            {
+                "dataset": dataset,
+                "train_ratio": train_ratio,
+                "seed": seed,
+                "model": model_name,
+                "index": idx,
+                "val_score": float(val_scores[idx]) if idx < len(val_scores) else "",
+                "y_val": int(y_val[idx]) if idx < len(y_val) else "",
+                "test_score": float(test_scores[idx]) if idx < len(test_scores) else "",
+                "y_test": int(y_test[idx]) if idx < len(y_test) else "",
+            }
+        )
+    return rows
+
+
+def write_scores_csv(path: Path, rows: List[Dict[str, object]], append: bool) -> None:
+    merged_rows: List[Dict[str, object]] = []
+    if append:
+        incoming_run_keys = {
+            (
+                str(row["dataset"]),
+                str(row["train_ratio"]),
+                str(row["seed"]),
+                str(row["model"]),
+            )
+            for row in rows
+        }
+        for existing in read_existing_csv_rows(path):
+            existing_run_key = (
+                str(existing.get("dataset", "")),
+                str(existing.get("train_ratio", "")),
+                str(existing.get("seed", "")),
+                str(existing.get("model", "")),
+            )
+            if existing_run_key not in incoming_run_keys:
+                merged_rows.append(existing)
+    merged_rows.extend(rows)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=SCORE_CSV_FIELDNAMES)
+        writer.writeheader()
+        for row in merged_rows:
+            writer.writerow({field: row.get(field, "") for field in SCORE_CSV_FIELDNAMES})
+
+
+def default_scores_csv_path(out_csv: Path) -> Path:
+    if "summary" in out_csv.stem:
+        return out_csv.with_name(out_csv.name.replace("summary", "scores", 1))
+    return out_csv.with_name(f"{out_csv.stem}_scores{out_csv.suffix or '.csv'}")
+
+
 EXTERNAL_METRIC_PATTERNS = {
     "accuracy": ("accuracy", "acc"),
     "precision": ("precision", "prec"),
@@ -1134,6 +1212,7 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
     print(f"[OK] total graphs loaded: {len(base_graphs)}", flush=True)
 
     summary_rows: List[Dict[str, object]] = []
+    score_rows: List[Dict[str, object]] = []
     all_details: Dict[str, object] = {}
 
     for train_ratio in config.train_ratios:
@@ -1196,6 +1275,18 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
                     metrics = result
                 else:
                     val_scores, test_scores = result
+                    score_rows.extend(
+                        make_score_rows(
+                            dataset=config.dataset,
+                            train_ratio=train_ratio,
+                            seed=seed,
+                            model_name=model_name,
+                            val_scores=val_scores,
+                            test_scores=test_scores,
+                            y_val=y_val,
+                            y_test=y_test,
+                        )
+                    )
                     threshold = best_threshold_from_validation(y_val, val_scores)
                     metrics = compute_metrics(y_test, test_scores, threshold=threshold)
                     metrics["threshold"] = threshold
@@ -1244,8 +1335,10 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
     with config.out_json.open("w") as f:
         json.dump(results, f, indent=2)
     write_summary_csv(config.out_csv, summary_rows, append=True)
+    write_scores_csv(config.out_scores_csv, score_rows, append=True)
     print(f"\n[OK] wrote {config.out_json}", flush=True)
     print(f"[OK] wrote {config.out_csv}", flush=True)
+    print(f"[OK] wrote {config.out_scores_csv}", flush=True)
     return results
 
 
@@ -1272,6 +1365,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", default=None)
     parser.add_argument("--out-json", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/ton_results_50%.json"))
     parser.add_argument("--out-csv", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/ton_summary_50%.csv"))
+    parser.add_argument(
+        "--out-scores-csv",
+        type=Path,
+        default=None,
+        help="CSV path for per-run validation/test scores and labels. Defaults beside --out-csv.",
+    )
     parser.add_argument("--train-ratios", default="0.50")
     parser.add_argument("--val-ratio", type=float, default=0.15)
     parser.add_argument("--seeds", default="42,43,44,45,46")
@@ -1311,6 +1410,7 @@ def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
         graph_dir=args.graph_dir,
         out_json=args.out_json,
         out_csv=args.out_csv,
+        out_scores_csv=args.out_scores_csv or default_scores_csv_path(args.out_csv),
         train_ratios=parse_float_tuple(args.train_ratios),
         val_ratio=args.val_ratio,
         seeds=parse_int_tuple(args.seeds),
