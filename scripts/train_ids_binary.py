@@ -1363,17 +1363,17 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train graph-only IDS baselines on existing graph classification .npz files.")
     parser.add_argument("--graph-dir", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph"))
     parser.add_argument("--dataset", default=None)
-    parser.add_argument("--out-json", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/ton_results_50%.json"))
-    parser.add_argument("--out-csv", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/ton_summary_50%.csv"))
+    parser.add_argument("--out-json", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_results_25%.json"))
+    parser.add_argument("--out-csv", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_summary_25%.csv"))
     parser.add_argument(
         "--out-scores-csv",
         type=Path,
-        default=None,
+        default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_out_scores_25%.csv"),
         help="CSV path for per-run validation/test scores and labels. Defaults beside --out-csv.",
     )
-    parser.add_argument("--train-ratios", default="0.50")
+    parser.add_argument("--train-ratios", default="0.25")
     parser.add_argument("--val-ratio", type=float, default=0.15)
-    parser.add_argument("--seeds", default="42,43,44,45,46")
+    parser.add_argument("--seeds", default="42,43")
     parser.add_argument("--models", default="graphcl,topogcl,infograph,rgcl", help="Comma-separated graph models: gnn,graphsage,graphcl,topogcl,infograph,rgcl")
     parser.add_argument("--epochs-graphcl", type=int, default=10)
     parser.add_argument("--epochs-topogcl", type=int, default=10)
