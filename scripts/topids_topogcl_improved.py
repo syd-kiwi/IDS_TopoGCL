@@ -339,7 +339,7 @@ def split_train_val_test(graphs: list[Graph], seed: int, train_ratio: float, val
 
 def load_streamspot(args, seed: int):
     print("Step 1/4: Loading StreamSpot provenance graphs...")
-    tsv = args.data_root / "streamspot" / "all.tsv"
+    tsv = Path(args.data_root).expanduser().resolve() / "streamspot" / "all.tsv"
     if not tsv.exists():
         raise FileNotFoundError(f"Missing {tsv}.")
     rng = np.random.default_rng(seed)
