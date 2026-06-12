@@ -57,11 +57,11 @@ FIXED_NODE_FEATURES = [
 BENIGN_MIN_EDGES = 1
 ATTACK_MIN_EDGES = 5
 MAX_EDGES = 3000
-MIN_BENIGN_GRAPHS = 200
-MIN_ATTACK_GRAPHS = 20
-MAX_BENIGN_GRAPHS = 250
-MAX_ATTACK_GRAPHS = 25
-CHUNK_SIZE = 500
+MIN_BENIGN_GRAPHS = 250
+MAX_BENIGN_GRAPHS = 25000
+MIN_ATTACK_GRAPHS = 250
+MAX_ATTACK_GRAPHS = 25000
+CHUNK_SIZE = 50000
 
 
 @dataclass
@@ -284,9 +284,9 @@ def normalize_chunk(
 def main() -> None:
     input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/NF-ToN-IoT-v3.csv"
     output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph"
-    #input_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
+    #nput_csv = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/NF-BoT-IoT-v3.csv"
     #output_dir = "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph"
-    window_seconds = 30
+    window_seconds = 60
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,711 @@
+{
+  "dataset": "CICIoT2023",
+  "dataset_root": "/media/kiwi-pandas/Extreme SSD/network_data/CIC_IoT",
+  "graph_cache_dir": "/media/kiwi-pandas/Extreme SSD/network_data/CIC_IoT/Graph_Multiclass",
+  "device": "cpu",
+  "window_size": 15,
+  "num_classes": 7,
+  "class_to_id": {
+    "Benign": 0,
+    "DDoS": 1,
+    "DoS": 2,
+    "Mirai": 3,
+    "Spoofing_MITM": 4,
+    "Web": 5,
+    "BruteForce": 6
+  },
+  "id_to_class": {
+    "0": "Benign",
+    "1": "DDoS",
+    "2": "DoS",
+    "3": "Mirai",
+    "4": "Spoofing_MITM",
+    "5": "Web",
+    "6": "BruteForce"
+  },
+  "class_distribution": {
+    "Benign": 73215,
+    "DDoS": 17774,
+    "DoS": 11123,
+    "Mirai": 2240,
+    "Spoofing_MITM": 11927,
+    "Web": 361,
+    "BruteForce": 871
+  },
+  "training": {
+    "models": [
+      "GNN",
+      "GraphSAGE",
+      "GraphCL",
+      "TopoIDS"
+    ],
+    "seeds": [
+      42
+    ],
+    "train_ratios": [
+      0.1
+    ],
+    "val_ratio": 0.15,
+    "epochs_supervised": 1,
+    "epochs_graphcl": 1,
+    "epochs_topogcl": 1,
+    "hidden_dim": 16,
+    "emb_dim": 16,
+    "graphcl_layers": 2,
+    "edge_drop": 0.001,
+    "feat_mask": 0.05,
+    "tau": 0.2,
+    "batch_size": 8,
+    "standardized": true
+  },
+  "runs": [
+    {
+      "dataset": "CICIoT2023",
+      "model": "GNN",
+      "seed": 42,
+      "train_ratio": 0.1,
+      "window_size": 15,
+      "num_classes": 7,
+      "class_distribution": {
+        "all": {
+          "Benign": 73215,
+          "DDoS": 17774,
+          "DoS": 11123,
+          "Mirai": 2240,
+          "Spoofing_MITM": 11927,
+          "Web": 361,
+          "BruteForce": 871
+        },
+        "train": {
+          "Benign": 7322,
+          "DDoS": 1777,
+          "DoS": 1112,
+          "Mirai": 224,
+          "Spoofing_MITM": 1193,
+          "Web": 36,
+          "BruteForce": 87
+        },
+        "validation": {
+          "Benign": 10982,
+          "DDoS": 2666,
+          "DoS": 1668,
+          "Mirai": 336,
+          "Spoofing_MITM": 1789,
+          "Web": 54,
+          "BruteForce": 131
+        },
+        "test": {
+          "Benign": 54911,
+          "DDoS": 13331,
+          "DoS": 8343,
+          "Mirai": 1680,
+          "Spoofing_MITM": 8945,
+          "Web": 271,
+          "BruteForce": 653
+        }
+      },
+      "metrics": {
+        "accuracy": 0.9265550184945651,
+        "macro_precision": 0.786348043214122,
+        "macro_recall": 0.6774278899443491,
+        "macro_f1": 0.7087486938630444,
+        "weighted_f1": 0.9219750281002278,
+        "per_class": {
+          "Benign": {
+            "precision": 0.9489856801909308,
+            "recall": 0.9848117863451767,
+            "f1": 0.9665668707270209,
+            "support": 54911
+          },
+          "DDoS": {
+            "precision": 0.8705987121523496,
+            "recall": 0.9533418348210937,
+            "f1": 0.9100934512513874,
+            "support": 13331
+          },
+          "DoS": {
+            "precision": 0.9126378286683631,
+            "recall": 0.7738223660553758,
+            "f1": 0.8375170266588831,
+            "support": 8343
+          },
+          "Mirai": {
+            "precision": 0.9993986770895971,
+            "recall": 0.9892857142857143,
+            "f1": 0.9943164822016153,
+            "support": 1680
+          },
+          "Spoofing_MITM": {
+            "precision": 0.8633131419541743,
+            "recall": 0.7329234209055339,
+            "f1": 0.7927927927927928,
+            "support": 8945
+          },
+          "Web": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 271
+          },
+          "BruteForce": {
+            "precision": 0.9095022624434389,
+            "recall": 0.30781010719754975,
+            "f1": 0.459954233409611,
+            "support": 653
+          }
+        },
+        "confusion_matrix": [
+          [
+            54077,
+            0,
+            0,
+            0,
+            834,
+            0,
+            0
+          ],
+          [
+            1,
+            12709,
+            616,
+            1,
+            0,
+            0,
+            4
+          ],
+          [
+            0,
+            1886,
+            6456,
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            1,
+            2,
+            1662,
+            0,
+            0,
+            15
+          ],
+          [
+            2387,
+            2,
+            0,
+            0,
+            6556,
+            0,
+            0
+          ],
+          [
+            170,
+            0,
+            0,
+            0,
+            101,
+            0,
+            0
+          ],
+          [
+            349,
+            0,
+            0,
+            0,
+            103,
+            0,
+            201
+          ]
+        ]
+      }
+    },
+    {
+      "dataset": "CICIoT2023",
+      "model": "GraphSAGE",
+      "seed": 42,
+      "train_ratio": 0.1,
+      "window_size": 15,
+      "num_classes": 7,
+      "class_distribution": {
+        "all": {
+          "Benign": 73215,
+          "DDoS": 17774,
+          "DoS": 11123,
+          "Mirai": 2240,
+          "Spoofing_MITM": 11927,
+          "Web": 361,
+          "BruteForce": 871
+        },
+        "train": {
+          "Benign": 7322,
+          "DDoS": 1777,
+          "DoS": 1112,
+          "Mirai": 224,
+          "Spoofing_MITM": 1193,
+          "Web": 36,
+          "BruteForce": 87
+        },
+        "validation": {
+          "Benign": 10982,
+          "DDoS": 2666,
+          "DoS": 1668,
+          "Mirai": 336,
+          "Spoofing_MITM": 1789,
+          "Web": 54,
+          "BruteForce": 131
+        },
+        "test": {
+          "Benign": 54911,
+          "DDoS": 13331,
+          "DoS": 8343,
+          "Mirai": 1680,
+          "Spoofing_MITM": 8945,
+          "Web": 271,
+          "BruteForce": 653
+        }
+      },
+      "metrics": {
+        "accuracy": 0.9490661946581342,
+        "macro_precision": 0.8139290973718475,
+        "macro_recall": 0.7199221772989332,
+        "macro_f1": 0.7496596577611122,
+        "weighted_f1": 0.9462293502136914,
+        "per_class": {
+          "Benign": {
+            "precision": 0.9674423569598634,
+            "recall": 0.9902933838393037,
+            "f1": 0.9787345098498007,
+            "support": 54911
+          },
+          "DDoS": {
+            "precision": 0.9119111175239881,
+            "recall": 0.9481659290375816,
+            "f1": 0.9296852015298617,
+            "support": 13331
+          },
+          "DoS": {
+            "precision": 0.9081749776814182,
+            "recall": 0.8535299053098406,
+            "f1": 0.8800049431537321,
+            "support": 8343
+          },
+          "Mirai": {
+            "precision": 1.0,
+            "recall": 0.981547619047619,
+            "f1": 0.9906878942625413,
+            "support": 1680
+          },
+          "Spoofing_MITM": {
+            "precision": 0.9136248644741597,
+            "recall": 0.8478479597540526,
+            "f1": 0.8795082917778035,
+            "support": 8945
+          },
+          "Web": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 271
+          },
+          "BruteForce": {
+            "precision": 0.9963503649635036,
+            "recall": 0.41807044410413474,
+            "f1": 0.5889967637540453,
+            "support": 653
+          }
+        },
+        "confusion_matrix": [
+          [
+            54378,
+            0,
+            0,
+            0,
+            533,
+            0,
+            0
+          ],
+          [
+            0,
+            12640,
+            691,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            1220,
+            7121,
+            0,
+            2,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            29,
+            1649,
+            1,
+            0,
+            0
+          ],
+          [
+            1360,
+            0,
+            0,
+            0,
+            7584,
+            0,
+            1
+          ],
+          [
+            155,
+            0,
+            0,
+            0,
+            116,
+            0,
+            0
+          ],
+          [
+            315,
+            0,
+            0,
+            0,
+            65,
+            0,
+            273
+          ]
+        ]
+      }
+    },
+    {
+      "dataset": "CICIoT2023",
+      "model": "GraphCL",
+      "seed": 42,
+      "train_ratio": 0.1,
+      "window_size": 15,
+      "num_classes": 7,
+      "class_distribution": {
+        "all": {
+          "Benign": 73215,
+          "DDoS": 17774,
+          "DoS": 11123,
+          "Mirai": 2240,
+          "Spoofing_MITM": 11927,
+          "Web": 361,
+          "BruteForce": 871
+        },
+        "train": {
+          "Benign": 7322,
+          "DDoS": 1777,
+          "DoS": 1112,
+          "Mirai": 224,
+          "Spoofing_MITM": 1193,
+          "Web": 36,
+          "BruteForce": 87
+        },
+        "validation": {
+          "Benign": 10982,
+          "DDoS": 2666,
+          "DoS": 1668,
+          "Mirai": 336,
+          "Spoofing_MITM": 1789,
+          "Web": 54,
+          "BruteForce": 131
+        },
+        "test": {
+          "Benign": 54911,
+          "DDoS": 13331,
+          "DoS": 8343,
+          "Mirai": 1680,
+          "Spoofing_MITM": 8945,
+          "Web": 271,
+          "BruteForce": 653
+        }
+      },
+      "metrics": {
+        "accuracy": 0.8811922753988245,
+        "macro_precision": 0.6179232040947374,
+        "macro_recall": 0.5766693786148,
+        "macro_f1": 0.5848158178823206,
+        "weighted_f1": 0.8635420793533102,
+        "per_class": {
+          "Benign": {
+            "precision": 0.8911938475756676,
+            "recall": 0.9834277285061281,
+            "f1": 0.9350417730834163,
+            "support": 54911
+          },
+          "DDoS": {
+            "precision": 0.9032282395534772,
+            "recall": 0.8982821993848924,
+            "f1": 0.9007484298017977,
+            "support": 13331
+          },
+          "DoS": {
+            "precision": 0.8101398601398602,
+            "recall": 0.833153541891406,
+            "f1": 0.8214855522070554,
+            "support": 8343
+          },
+          "Mirai": {
+            "precision": 0.9376430205949656,
+            "recall": 0.9755952380952381,
+            "f1": 0.956242707117853,
+            "support": 1680
+          },
+          "Spoofing_MITM": {
+            "precision": 0.7832574607991907,
+            "recall": 0.34622694242593627,
+            "f1": 0.4801922629661214,
+            "support": 8945
+          },
+          "Web": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 271
+          },
+          "BruteForce": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 653
+          }
+        },
+        "confusion_matrix": [
+          [
+            54001,
+            8,
+            82,
+            40,
+            780,
+            0,
+            0
+          ],
+          [
+            28,
+            11975,
+            1320,
+            0,
+            8,
+            0,
+            0
+          ],
+          [
+            78,
+            1239,
+            6951,
+            35,
+            40,
+            0,
+            0
+          ],
+          [
+            41,
+            0,
+            0,
+            1639,
+            0,
+            0,
+            0
+          ],
+          [
+            5596,
+            36,
+            182,
+            34,
+            3097,
+            0,
+            0
+          ],
+          [
+            219,
+            0,
+            43,
+            0,
+            9,
+            0,
+            0
+          ],
+          [
+            631,
+            0,
+            2,
+            0,
+            20,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "dataset": "CICIoT2023",
+      "model": "TopoIDS",
+      "seed": 42,
+      "train_ratio": 0.1,
+      "window_size": 15,
+      "num_classes": 7,
+      "class_distribution": {
+        "all": {
+          "Benign": 73215,
+          "DDoS": 17774,
+          "DoS": 11123,
+          "Mirai": 2240,
+          "Spoofing_MITM": 11927,
+          "Web": 361,
+          "BruteForce": 871
+        },
+        "train": {
+          "Benign": 7322,
+          "DDoS": 1777,
+          "DoS": 1112,
+          "Mirai": 224,
+          "Spoofing_MITM": 1193,
+          "Web": 36,
+          "BruteForce": 87
+        },
+        "validation": {
+          "Benign": 10982,
+          "DDoS": 2666,
+          "DoS": 1668,
+          "Mirai": 336,
+          "Spoofing_MITM": 1789,
+          "Web": 54,
+          "BruteForce": 131
+        },
+        "test": {
+          "Benign": 54911,
+          "DDoS": 13331,
+          "DoS": 8343,
+          "Mirai": 1680,
+          "Spoofing_MITM": 8945,
+          "Web": 271,
+          "BruteForce": 653
+        }
+      },
+      "metrics": {
+        "accuracy": 0.8150883881362471,
+        "macro_precision": 0.6185938588103922,
+        "macro_recall": 0.47703354362934675,
+        "macro_f1": 0.48956657524506025,
+        "weighted_f1": 0.7685812969040694,
+        "per_class": {
+          "Benign": {
+            "precision": 0.8071062238578756,
+            "recall": 0.9944819799311614,
+            "f1": 0.8910500122379049,
+            "support": 54911
+          },
+          "DDoS": {
+            "precision": 0.8179545779174404,
+            "recall": 0.8591253469357137,
+            "f1": 0.8380346101781729,
+            "support": 13331
+          },
+          "DoS": {
+            "precision": 0.9212319433088035,
+            "recall": 0.4051300491429941,
+            "f1": 0.5627705627705628,
+            "support": 8343
+          },
+          "Mirai": {
+            "precision": 0.9795680093403386,
+            "recall": 0.9988095238095238,
+            "f1": 0.9890951959917477,
+            "support": 1680
+          },
+          "Spoofing_MITM": {
+            "precision": 0.6614391143911439,
+            "recall": 0.0801565120178871,
+            "f1": 0.14298534250673048,
+            "support": 8945
+          },
+          "Web": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 271
+          },
+          "BruteForce": {
+            "precision": 0.14285714285714285,
+            "recall": 0.0015313935681470138,
+            "f1": 0.0030303030303030303,
+            "support": 653
+          }
+        },
+        "confusion_matrix": [
+          [
+            54608,
+            7,
+            0,
+            4,
+            292,
+            0,
+            0
+          ],
+          [
+            1808,
+            11453,
+            53,
+            16,
+            1,
+            0,
+            0
+          ],
+          [
+            2437,
+            2523,
+            3380,
+            2,
+            1,
+            0,
+            0
+          ],
+          [
+            2,
+            0,
+            0,
+            1678,
+            0,
+            0,
+            0
+          ],
+          [
+            8194,
+            19,
+            0,
+            9,
+            717,
+            0,
+            6
+          ],
+          [
+            222,
+            0,
+            0,
+            0,
+            49,
+            0,
+            0
+          ],
+          [
+            388,
+            0,
+            236,
+            4,
+            24,
+            0,
+            1
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,129 @@
+{
+  "dataset": "NF-BoT-IoT",
+  "graph_dir": "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph",
+  "device": "cpu",
+  "num_graphs_loaded": 301,
+  "split": {
+    "train": 75,
+    "val": 45,
+    "test": 181,
+    "train_ratio": 0.25,
+    "val_ratio": 0.15
+  },
+  "labels": {
+    "train_benign": 69,
+    "train_malicious": 6,
+    "test_benign": 166,
+    "test_malicious": 15
+  },
+  "training": {
+    "epochs_topogcl": 25,
+    "epochs_gnn": 1,
+    "lr_topogcl": 0.001,
+    "lr_gnn": 0.001,
+    "hidden_dim": 16,
+    "emb_dim": 16,
+    "edge_drop": 0.001,
+    "feat_mask": 0.05,
+    "tau": 0.2,
+    "batch_size": 8,
+    "threshold_q": 0.99,
+    "standardized": true,
+    "seeds": [
+      42
+    ],
+    "benign_limit": 0,
+    "mal_limit": 0,
+    "max_graphs": 0,
+    "max_nodes": 50000,
+    "epochs_graphcl": 100,
+    "lr_graphcl": 0.001,
+    "graphcl_hidden_dim": 16,
+    "graphcl_num_layers": 2,
+    "graphcl_edge_drop": 0.001,
+    "graphcl_feat_mask": 0.05,
+    "graphcl_tau": 0.2,
+    "graphcl_batch_size": 8,
+    "graphcl_threshold": 0.5
+  },
+  "models": {
+    "gnn": {
+      "runs": [
+        {
+          "accuracy": 0.9779005524861878,
+          "precision": 1.0,
+          "recall": 0.7333333333333333,
+          "f1": 0.8461538461538461,
+          "auroc": 0.9473895582329317,
+          "auprc": 0.8748179855086115
+        }
+      ],
+      "summary": {
+        "accuracy_mean": 0.9779005524861878,
+        "accuracy_std": 0.0,
+        "precision_mean": 1.0,
+        "precision_std": 0.0,
+        "recall_mean": 0.7333333333333333,
+        "recall_std": 0.0,
+        "f1_mean": 0.8461538461538461,
+        "f1_std": 0.0,
+        "auroc_mean": 0.9473895582329317,
+        "auroc_std": 0.0,
+        "auprc_mean": 0.8748179855086115,
+        "auprc_std": 0.0
+      }
+    },
+    "topogcl": {
+      "runs": [
+        {
+          "accuracy": 0.9668508287292817,
+          "precision": 0.8,
+          "recall": 0.8,
+          "f1": 0.8,
+          "auroc": 0.9899598393574297,
+          "auprc": 0.799680423062776
+        }
+      ],
+      "summary": {
+        "accuracy_mean": 0.9668508287292817,
+        "accuracy_std": 0.0,
+        "precision_mean": 0.8,
+        "precision_std": 0.0,
+        "recall_mean": 0.8,
+        "recall_std": 0.0,
+        "f1_mean": 0.8,
+        "f1_std": 0.0,
+        "auroc_mean": 0.9899598393574297,
+        "auroc_std": 0.0,
+        "auprc_mean": 0.799680423062776,
+        "auprc_std": 0.0
+      }
+    },
+    "graphcl": {
+      "runs": [
+        {
+          "accuracy": 0.9834254143646409,
+          "precision": 0.9285714285714286,
+          "recall": 0.8666666666666667,
+          "f1": 0.896551724137931,
+          "auroc": 0.9963855421686747,
+          "auprc": 0.94747520997521
+        }
+      ],
+      "summary": {
+        "accuracy_mean": 0.9834254143646409,
+        "accuracy_std": 0.0,
+        "precision_mean": 0.9285714285714286,
+        "precision_std": 0.0,
+        "recall_mean": 0.8666666666666667,
+        "recall_std": 0.0,
+        "f1_mean": 0.896551724137931,
+        "f1_std": 0.0,
+        "auroc_mean": 0.9963855421686747,
+        "auroc_std": 0.0,
+        "auprc_mean": 0.94747520997521,
+        "auprc_std": 0.0
+      }
+    }
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "dataset": "NF-BoT-IoT",
+  "graph_dir": "/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph",
+  "device": "cpu",
+  "num_graphs_loaded": 333,
+  "split": {
+    "train": 83,
+    "val": 50,
+    "test": 200,
+    "train_ratio": 0.25,
+    "val_ratio": 0.15
+  },
+  "labels": {
+    "train_benign": 77,
+    "train_malicious": 6,
+    "test_benign": 185,
+    "test_malicious": 15
+  },
+  "training": {
+    "epochs_topogcl": 100,
+    "epochs_gnn": 1,
+    "lr_topogcl": 0.001,
+    "lr_gnn": 0.001,
+    "hidden_dim": 64,
+    "emb_dim": 32,
+    "edge_drop": 0.2,
+    "feat_mask": 0.2,
+    "tau": 0.2,
+    "batch_size": 16,
+    "threshold_q": 0.99,
+    "standardized": true,
+    "seeds": [
+      42,
+      43,
+      44,
+      45,
+      46
+    ],
+    "benign_limit": 0,
+    "mal_limit": 0,
+    "max_graphs": 0,
+    "max_nodes": 50000
+  },
+  "models": {
+    "gnn": {
+      "runs": [
+        {
+          "accuracy": 0.995,
+          "precision": 1.0,
+          "recall": 0.9333333333333333,
+          "f1": 0.9655172413793104,
+          "auroc": 0.9592792792792793,
+          "auprc": 0.9411458333333333
+        },
+        {
+          "accuracy": 0.99,
+          "precision": 1.0,
+          "recall": 0.8666666666666667,
+          "f1": 0.9285714285714286,
+          "auroc": 0.9401801801801802,
+          "auprc": 0.9388581952117864
+        },
+        {
+          "accuracy": 0.975,
+          "precision": 1.0,
+          "recall": 0.6666666666666666,
+          "f1": 0.8,
+          "auroc": 0.9171171171171171,
+          "auprc": 0.8398868380575698
+        },
+        {
+          "accuracy": 0.985,
+          "precision": 1.0,
+          "recall": 0.8,
+          "f1": 0.8888888888888888,
+          "auroc": 0.9351351351351351,
+          "auprc": 0.8876392684465
+        },
+        {
+          "accuracy": 0.98,
+          "precision": 1.0,
+          "recall": 0.7333333333333333,
+          "f1": 0.8461538461538461,
+          "auroc": 0.8190990990990992,
+          "auprc": 0.81543303358352
+        }
+      ],
+      "summary": {
+        "accuracy_mean": 0.985,
+        "accuracy_std": 0.007071067811865481,
+        "precision_mean": 1.0,
+        "precision_std": 0.0,
+        "recall_mean": 0.8,
+        "recall_std": 0.09428090415820636,
+        "f1_mean": 0.8858262809986949,
+        "f1_std": 0.05852730810668536,
+        "auroc_mean": 0.9141621621621623,
+        "auroc_std": 0.04939245859762061,
+        "auprc_mean": 0.8845926337265417,
+        "auprc_std": 0.05086050725372261
+      }
+    },
+    "topogcl": {
+      "runs": [
+        {
+          "accuracy": 0.975,
+          "precision": 0.8125,
+          "recall": 0.8666666666666667,
+          "f1": 0.8387096774193549,
+          "auroc": 0.9855855855855856,
+          "auprc": 0.9227272727272727
+        },
+        {
+          "accuracy": 0.985,
+          "precision": 1.0,
+          "recall": 0.8,
+          "f1": 0.8888888888888888,
+          "auroc": 0.954954954954955,
+          "auprc": 0.8611044973544972
+        },
+        {
+          "accuracy": 0.975,
+          "precision": 0.9166666666666666,
+          "recall": 0.7333333333333333,
+          "f1": 0.8148148148148148,
+          "auroc": 0.9416216216216216,
+          "auprc": 0.8125626175626175
+        },
+        {
+          "accuracy": 0.98,
+          "precision": 0.9230769230769231,
+          "recall": 0.8,
+          "f1": 0.8571428571428571,
+          "auroc": 0.9747747747747748,
+          "auprc": 0.8751942501942502
+        },
+        {
+          "accuracy": 0.985,
+          "precision": 1.0,
+          "recall": 0.8,
+          "f1": 0.8888888888888888,
+          "auroc": 0.9816216216216216,
+          "auprc": 0.8902464157706093
+        }
+      ],
+      "summary": {
+        "accuracy_mean": 0.9800000000000001,
+        "accuracy_std": 0.004472135954999583,
+        "precision_mean": 0.9304487179487179,
+        "precision_std": 0.06903759849947434,
+        "recall_mean": 0.8,
+        "recall_std": 0.04216370213557842,
+        "f1_mean": 0.857689025430961,
+        "f1_std": 0.028794356552244525,
+        "auroc_mean": 0.9677117117117117,
+        "auroc_std": 0.01677066167241977,
+        "auprc_mean": 0.8723670107218494,
+        "auprc_std": 0.03624150119871023
+      }
+    }
+  }
+}
