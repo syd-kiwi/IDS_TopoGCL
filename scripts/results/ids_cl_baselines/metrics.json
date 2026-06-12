@@ -1,0 +1,173 @@
+{
+  "dataset": "all",
+  "data_root": "../data",
+  "device": "cuda",
+  "train_ratios": [
+    0.8
+  ],
+  "datasets": {
+    "streamspot": {
+      "dataset": "streamspot",
+      "data_root": "../data",
+      "num_graphs_loaded": 600,
+      "runs_by_train_ratio": {
+        "0.8": {
+          "models": {
+            "infograph": {
+              "runs": [
+                {
+                  "accuracy": 1.0,
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "auroc": 1.0,
+                  "auprc": 0.9999999999999999
+                },
+                {
+                  "accuracy": 1.0,
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "auroc": 1.0,
+                  "auprc": 0.9999999999999999
+                },
+                {
+                  "accuracy": 1.0,
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "auroc": 1.0,
+                  "auprc": 0.9999999999999999
+                }
+              ],
+              "summary": {
+                "accuracy_mean": 1.0,
+                "accuracy_std": 0.0,
+                "precision_mean": 1.0,
+                "precision_std": 0.0,
+                "recall_mean": 1.0,
+                "recall_std": 0.0,
+                "f1_mean": 1.0,
+                "f1_std": 0.0,
+                "auroc_mean": 1.0,
+                "auroc_std": 0.0,
+                "auprc_mean": 0.9999999999999999,
+                "auprc_std": 0.0
+              }
+            }
+          },
+          "split": {
+            "train": 480,
+            "val": 60,
+            "test": 60,
+            "train_ratio": 0.8,
+            "val_ratio": 0.1
+          },
+          "labels": {
+            "train_benign": 400,
+            "train_malicious": 80,
+            "val_benign": 50,
+            "val_malicious": 10,
+            "test_benign": 50,
+            "test_malicious": 10
+          }
+        }
+      }
+    },
+    "grasec": {
+      "dataset": "grasec",
+      "data_root": "../data",
+      "num_graphs_loaded": 7443,
+      "runs_by_train_ratio": {
+        "0.8": {
+          "models": {
+            "infograph": {
+              "runs": [
+                {
+                  "accuracy": 0.9892617449664429,
+                  "precision": 0.9985590778097982,
+                  "recall": 0.99,
+                  "f1": 0.994261119081779,
+                  "auroc": 0.9984126984126983,
+                  "auprc": 0.9998996763768422
+                },
+                {
+                  "accuracy": 0.9758389261744966,
+                  "precision": 0.9985380116959064,
+                  "recall": 0.9757142857142858,
+                  "f1": 0.9869942196531792,
+                  "auroc": 0.9916190476190476,
+                  "auprc": 0.9994637890386313
+                },
+                {
+                  "accuracy": 0.9865771812080537,
+                  "precision": 1.0,
+                  "recall": 0.9857142857142858,
+                  "f1": 0.9928057553956835,
+                  "auroc": 0.9977777777777778,
+                  "auprc": 0.9998608871728962
+                }
+              ],
+              "summary": {
+                "accuracy_mean": 0.9838926174496644,
+                "accuracy_std": 0.005799320535488016,
+                "precision_mean": 0.9990323631685682,
+                "precision_std": 0.0006842766124144722,
+                "recall_mean": 0.9838095238095238,
+                "recall_std": 0.005985621471417381,
+                "f1_mean": 0.9913536980435472,
+                "f1_std": 0.0031393534091981156,
+                "auroc_mean": 0.9959365079365079,
+                "auroc_std": 0.003063889548465601,
+                "auprc_mean": 0.99974145086279,
+                "auprc_std": 0.00019697413879661067
+              }
+            }
+          },
+          "split": {
+            "train": 5954,
+            "val": 744,
+            "test": 745,
+            "train_ratio": 0.8,
+            "val_ratio": 0.1
+          },
+          "labels": {
+            "train_benign": 361,
+            "train_malicious": 5593,
+            "val_benign": 45,
+            "val_malicious": 699,
+            "test_benign": 45,
+            "test_malicious": 700
+          }
+        }
+      }
+    }
+  },
+  "training": {
+    "models": [
+      "infograph"
+    ],
+    "epochs_graphcl": 10,
+    "epochs_infograph": 10,
+    "lr_graphcl": 0.001,
+    "lr_infograph": 0.001,
+    "infograph_layers": 3,
+    "hidden_dim": 16,
+    "emb_dim": 16,
+    "graphcl_layers": 3,
+    "edge_drop": 0.001,
+    "feat_mask": 0.005,
+    "tau": 0.05,
+    "batch_size": 8,
+    "standardized": true,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "benign_limit": 0,
+    "mal_limit": 0,
+    "max_graphs": 0,
+    "max_nodes": 512
+  }
+}

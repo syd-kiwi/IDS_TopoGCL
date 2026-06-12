@@ -1,0 +1,170 @@
+{
+  "dataset": "all",
+  "data_root": "../data",
+  "device": "cuda",
+  "train_ratios": [
+    0.8
+  ],
+  "datasets": {
+    "streamspot": {
+      "dataset": "streamspot",
+      "data_root": "../data",
+      "num_graphs_loaded": 600,
+      "runs_by_train_ratio": {
+        "0.8": {
+          "models": {
+            "gnn": {
+              "runs": [
+                {
+                  "accuracy": 1.0,
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "auroc": 1.0,
+                  "auprc": 0.9999999999999999,
+                  "threshold": 0.9857295751571655
+                },
+                {
+                  "accuracy": 0.9666666666666667,
+                  "precision": 1.0,
+                  "recall": 0.8,
+                  "f1": 0.8888888888888888,
+                  "auroc": 1.0,
+                  "auprc": 0.9999999999999999,
+                  "threshold": 0.9930256605148315
+                },
+                {
+                  "accuracy": 1.0,
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "auroc": 1.0,
+                  "auprc": 0.9999999999999999,
+                  "threshold": 0.7895975112915039
+                }
+              ],
+              "summary": {
+                "accuracy_mean": 0.9888888888888889,
+                "accuracy_std": 0.01571348402636772,
+                "precision_mean": 1.0,
+                "precision_std": 0.0,
+                "recall_mean": 0.9333333333333332,
+                "recall_std": 0.09428090415820632,
+                "f1_mean": 0.9629629629629629,
+                "f1_std": 0.05237828008789243,
+                "auroc_mean": 1.0,
+                "auroc_std": 0.0,
+                "auprc_mean": 0.9999999999999999,
+                "auprc_std": 0.0
+              }
+            }
+          },
+          "split": {
+            "train": 480,
+            "val": 60,
+            "test": 60,
+            "train_ratio": 0.8,
+            "val_ratio": 0.1
+          },
+          "labels": {
+            "train_benign": 400,
+            "train_malicious": 80,
+            "val_benign": 50,
+            "val_malicious": 10,
+            "test_benign": 50,
+            "test_malicious": 10
+          }
+        }
+      }
+    },
+    "grasec": {
+      "dataset": "grasec",
+      "data_root": "../data",
+      "num_graphs_loaded": 7443,
+      "runs_by_train_ratio": {
+        "0.8": {
+          "models": {
+            "gnn": {
+              "runs": [
+                {
+                  "accuracy": 0.9892617449664429,
+                  "precision": 0.9942857142857143,
+                  "recall": 0.9942857142857143,
+                  "f1": 0.9942857142857143,
+                  "auroc": 0.9983809523809524,
+                  "auprc": 0.9998977808000636,
+                  "threshold": 0.4611606001853943
+                },
+                {
+                  "accuracy": 0.9838926174496644,
+                  "precision": 0.9985507246376811,
+                  "recall": 0.9842857142857143,
+                  "f1": 0.9913669064748202,
+                  "auroc": 0.9971111111111111,
+                  "auprc": 0.9998183710891609,
+                  "threshold": 0.6312028765678406
+                },
+                {
+                  "accuracy": 0.9906040268456375,
+                  "precision": 0.9985611510791367,
+                  "recall": 0.9914285714285714,
+                  "f1": 0.9949820788530466,
+                  "auroc": 0.9990476190476191,
+                  "auprc": 0.9999392938066902,
+                  "threshold": 0.8163558840751648
+                }
+              ],
+              "summary": {
+                "accuracy_mean": 0.9879194630872483,
+                "accuracy_std": 0.002899660267744008,
+                "precision_mean": 0.9971325300008441,
+                "precision_std": 0.002013007197304984,
+                "recall_mean": 0.9900000000000001,
+                "recall_std": 0.004205600412537071,
+                "f1_mean": 0.9935448998711937,
+                "f1_std": 0.0015660932983369662,
+                "auroc_mean": 0.9981798941798942,
+                "auroc_std": 0.000803257554046522,
+                "auprc_mean": 0.9998851485653049,
+                "auprc_std": 5.0168090256097414e-05
+              }
+            }
+          },
+          "split": {
+            "train": 5954,
+            "val": 744,
+            "test": 745,
+            "train_ratio": 0.8,
+            "val_ratio": 0.1
+          },
+          "labels": {
+            "train_benign": 361,
+            "train_malicious": 5593,
+            "val_benign": 45,
+            "val_malicious": 699,
+            "test_benign": 45,
+            "test_malicious": 700
+          }
+        }
+      }
+    }
+  },
+  "training": {
+    "models": [
+      "gnn"
+    ],
+    "epochs": 10,
+    "lr": 0.001,
+    "hidden_dim": 16,
+    "standardized": true,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "benign_limit": 0,
+    "mal_limit": 0,
+    "max_graphs": 0,
+    "max_nodes": 512
+  }
+}
