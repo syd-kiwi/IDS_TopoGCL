@@ -56,7 +56,7 @@ import torch.nn.functional as F
 
 print = partial(print, flush=True)
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA = ROOT / "data"
 
 STREAMSPOT_NODE_TYPES = list("abcdefgh")
