@@ -270,7 +270,7 @@ def train_infograph_ids(
 
     if len(np.unique(y_train)) < 2:
         raise RuntimeError("InfoGraph logistic regression needs both classes in the train split.")
-    classifier = LogisticRegression(class_weight="balanced", max_iter=1000, random_state=seed)
+    classifier = LogisticRegression(class_weight="balanced", max_iter=5000, random_state=seed)
     classifier.fit(train_emb, y_train)
     y_pred = classifier.predict(test_emb)
     if hasattr(classifier, "predict_proba"):
