@@ -800,7 +800,8 @@ def train_topogcl_scores(
     if len(train_benign) < 2:
         raise RuntimeError("TopoGCL needs at least two benign graphs in the train split.")
     model = GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.emb_dim)
-    train_topogcl_encoder(model=model, graphs=train_benign, config=config, seed=seed, device=device)
+    aug_config = get_model_augmentation_config("topogcl", config)
+    train_topogcl_encoder(model=model, graphs=train_benign, config=config, aug_config=aug_config, seed=seed, device=device)
     train_emb = compute_gcn_embeddings(model, train_benign, device=device, tag="embed topogcl train benign")
     eval_emb = compute_gcn_embeddings(model, eval_graphs, device=device, tag="embed topogcl eval")
     center = train_emb.mean(dim=0)
@@ -1112,23 +1113,9 @@ def model_runner(
     device: torch.device,
 ) -> Tuple[np.ndarray, np.ndarray] | Dict[str, float]:
     if model_name in {"gnn", "graphsage"}:
-        if model_name == "gnn":
-            factory = lambda: GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.hidden_dim)
-        else:
-            factory = lambda: GraphSAGEEncoder(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.hidden_dim)
-        classifier = train_supervised_graph_model(
-            model_name=model_name,
-            encoder_factory=factory,
-            train_graphs=train_graphs,
-            hidden_dim=config.hidden_dim,
-            epochs=config.epochs_topogcl,
-            lr=config.lr_topogcl,
-            seed=seed,
-            device=device,
-        )
-        return (
-            predict_supervised_graph_model(classifier, val_graphs, device),
-            predict_supervised_graph_model(classifier, test_graphs, device),
+        raise ValueError(
+            f"{model_name} is supervised and is intentionally not supported in "
+            "train_ids_cl_baselines.py. Use train_ids_gnn.py for the base GNN baseline."
         )
 
     if model_name == "graphcl":
@@ -1360,7 +1347,7 @@ def parse_int_tuple(raw: str) -> Tuple[int, ...]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train graph-only IDS baselines on existing graph classification .npz files.")
+    parser = argparse.ArgumentParser(description="Train contrastive/self-supervised IDS baselines on existing graph classification .npz files.")
     parser.add_argument("--graph-dir", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph"))
     parser.add_argument("--dataset", default=None)
     parser.add_argument("--out-json", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_results_25%.json"))
@@ -1374,7 +1361,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-ratios", default="0.25")
     parser.add_argument("--val-ratio", type=float, default=0.15)
     parser.add_argument("--seeds", default="42,43")
-    parser.add_argument("--models", default="graphcl,topogcl,infograph,rgcl", help="Comma-separated graph models: gnn,graphsage,graphcl,topogcl,infograph,rgcl")
+    parser.add_argument("--models", default="graphcl,topogcl,infograph,rgcl", help="Comma-separated CL baseline models: graphcl,topogcl,infograph,rgcl")
     parser.add_argument("--epochs-graphcl", type=int, default=10)
     parser.add_argument("--epochs-topogcl", type=int, default=10)
     parser.add_argument("--epochs-infograph", type=int, default=10)
@@ -1401,7 +1388,7 @@ def parse_args() -> argparse.Namespace:
 
 def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
     models = tuple(model.strip().lower() for model in args.models.split(",") if model.strip())
-    allowed = {"gnn", "graphsage", "graphcl", "topogcl", "infograph", "rgcl"}
+    allowed = {"graphcl", "topogcl", "infograph", "rgcl"}
     unknown = set(models) - allowed
     if unknown:
         raise ValueError(f"Unknown models {sorted(unknown)}; allowed models are {sorted(allowed)}")

@@ -145,12 +145,11 @@ def run_supervised_model(
     seed: int,
     device: torch.device,
 ) -> Dict[str, float]:
-    if model_name == "gnn":
-        factory = lambda: GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.hidden_dim)
-    elif model_name == "graphsage":
-        factory = lambda: GraphSAGEEncoder(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.hidden_dim)
-    else:
-        raise ValueError(f"Unknown supervised model: {model_name}")
+    if model_name != "gnn":
+        raise ValueError(
+            f"Unknown supervised model: {model_name}. train_ids_gnn.py intentionally runs only the base GNN baseline."
+        )
+    factory = lambda: GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.hidden_dim)
 
     classifier = train_supervised_graph_model(
         model_name=model_name,
@@ -268,7 +267,7 @@ def run_experiment(config: SupervisedConfig) -> Dict[str, object]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train supervised GNN and GraphSAGE IDS baselines on .npz graph files.")
+    parser = argparse.ArgumentParser(description="Train the supervised base GNN IDS baseline on .npz graph files.")
     parser.add_argument("--graph-dir", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-ToN-IoT/Graph"))
     parser.add_argument("--dataset", default=None)
     parser.add_argument("--out-json", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_ton_iot/ton_supervised_results_25%.json"))
@@ -276,7 +275,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-ratios", default="0.25")
     parser.add_argument("--val-ratio", type=float, default=0.15)
     parser.add_argument("--seeds", default="42,43,44")
-    parser.add_argument("--models", default="gnn,graphsage", help="Comma-separated supervised graph models: gnn,graphsage")
+    parser.add_argument("--models", default="gnn", help="Supervised graph model to run. Only gnn is supported in this script.")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--hidden-dim", type=int, default=16)
@@ -290,7 +289,7 @@ def parse_args() -> argparse.Namespace:
 
 def config_from_args(args: argparse.Namespace) -> SupervisedConfig:
     models = tuple(model.strip().lower() for model in args.models.split(",") if model.strip())
-    allowed = {"gnn", "graphsage"}
+    allowed = {"gnn"}
     unknown = set(models) - allowed
     if unknown:
         raise ValueError(f"Unknown models {sorted(unknown)}; allowed models are {sorted(allowed)}")
