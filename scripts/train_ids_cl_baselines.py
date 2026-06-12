@@ -2,17 +2,15 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
-import re
 import random
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -21,52 +19,29 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GINConv, global_add_pool
 
+from ids_graph_data import (
+    GraphWindow,
+    best_threshold_from_validation,
+    build_sparse_a_hat_from_undirected,
+    clone_graphs,
+    compute_metrics,
+    load_dataset_graphs,
+    make_score_rows,
+    parse_float_tuple,
+    parse_int_tuple,
+    split_for_all_models,
+    standardize_from_train,
+    summarize_metrics,
+    write_scores_csv,
+    write_summary_csv,
+)
 
-CSV_FIELDNAMES = [
-    "dataset",
-    "train_ratio",
-    "model",
-    "accuracy_mean",
-    "accuracy_std",
-    "precision_mean",
-    "precision_std",
-    "recall_mean",
-    "recall_std",
-    "f1_mean",
-    "f1_std",
-    "auroc_mean",
-    "auroc_std",
-    "auprc_mean",
-    "auprc_std",
-]
-METRIC_NAMES = ["accuracy", "precision", "recall", "f1", "auroc", "auprc"]
-SCORE_CSV_FIELDNAMES = [
-    "dataset",
-    "train_ratio",
-    "seed",
-    "model",
-    "index",
-    "val_score",
-    "y_val",
-    "test_score",
-    "y_test",
-]
-
-
-@dataclass
-class GraphWindow:
-    x: torch.Tensor
-    edges_undirected: torch.Tensor
-    num_nodes: int
-    window_start: int
-    label: int
-    file_name: str
+DEFAULT_DATA_ROOT = Path(__file__).resolve().parents[1] / "data"
+DATASET_CHOICES = ("streamspot", "grasec", "all")
 
 
 @dataclass(frozen=True)
@@ -80,7 +55,7 @@ class ModelAugmentationConfig:
 @dataclass(frozen=True)
 class ExperimentConfig:
     dataset: str
-    graph_dir: Path
+    data_root: Path
     out_json: Path
     out_csv: Path
     out_scores_csv: Path
@@ -88,14 +63,10 @@ class ExperimentConfig:
     val_ratio: float
     seeds: Tuple[int, ...]
     epochs_graphcl: int
-    epochs_topogcl: int
     epochs_infograph: int
     lr_graphcl: float
-    lr_topogcl: float
     lr_infograph: float
     infograph_layers: int
-    infograph_dir: Path
-    rgcl_dir: Path
     hidden_dim: int
     emb_dim: int
     graphcl_layers: int
@@ -112,30 +83,14 @@ class ExperimentConfig:
 
 
 def get_model_augmentation_config(model_name: str, config: ExperimentConfig) -> ModelAugmentationConfig:
-    """Return model-specific contrastive augmentation settings.
-
-    GraphCL keeps the user-provided/default augmentation behavior. TopoGCL
-    intentionally uses a lighter topology-aware setup so small IDS graphs retain
-    more of their edge structure during contrastive training.
-    """
-    model_configs = {
-        "graphcl": ModelAugmentationConfig(
-            edge_drop=config.edge_drop,
-            feat_mask=config.feat_mask,
-            tau=config.tau,
-            batch_size=config.batch_size,
-        ),
-        "topogcl": ModelAugmentationConfig(
-            edge_drop=0.01,
-            feat_mask=0.05,
-            tau=0.10,
-            batch_size=config.batch_size,
-        ),
-    }
-    try:
-        return model_configs[model_name]
-    except KeyError as exc:
-        raise ValueError(f"No augmentation config defined for model: {model_name}") from exc
+    if model_name != "graphcl":
+        raise ValueError(f"No augmentation config defined for model: {model_name}")
+    return ModelAugmentationConfig(
+        edge_drop=config.edge_drop,
+        feat_mask=config.feat_mask,
+        tau=config.tau,
+        batch_size=config.batch_size,
+    )
 
 
 def format_config_float(value: float) -> str:
@@ -149,218 +104,6 @@ def log_augmentation_config(model_name: str, aug_config: ModelAugmentationConfig
         f"tau={format_config_float(aug_config.tau)} batch_size={aug_config.batch_size}",
         flush=True,
     )
-
-
-# =========================================================
-# Data loading and split helpers. These preserve the existing
-# graph construction output format and train/val/test split logic.
-# =========================================================
-def edge_index_to_undirected(edge_index: np.ndarray, num_nodes: int) -> torch.Tensor:
-    edge_index = np.asarray(edge_index)
-
-    if edge_index.size == 0:
-        return torch.zeros((2, 0), dtype=torch.long)
-
-    if edge_index.shape[0] != 2 and edge_index.shape[1] == 2:
-        edge_index = edge_index.T
-
-    if edge_index.shape[0] != 2:
-        raise ValueError(f"edge_index must have shape [2, E] or [E, 2], got {edge_index.shape}")
-
-    edge_set = set()
-    for u, v in edge_index.T:
-        u = int(u)
-        v = int(v)
-        if u < 0 or v < 0 or u >= num_nodes or v >= num_nodes or u == v:
-            continue
-        a, b = (u, v) if u < v else (v, u)
-        edge_set.add((a, b))
-
-    if not edge_set:
-        return torch.zeros((2, 0), dtype=torch.long)
-
-    return torch.tensor(sorted(edge_set), dtype=torch.long).t().contiguous()
-
-
-def load_npz_graphs(graph_dir: Path, max_graphs: Optional[int], max_nodes: int) -> List[GraphWindow]:
-    graphs: List[GraphWindow] = []
-    paths = sorted(graph_dir.glob("*.npz"))
-    if not paths:
-        raise FileNotFoundError(f"No .npz graph files found in {graph_dir}")
-
-    for path in paths:
-        try:
-            arr = np.load(path, allow_pickle=True)
-            node_features = arr["node_features"].astype(np.float32)
-            label = int(np.array(arr["label"]).reshape(-1)[0])
-            edge_index = arr["edge_index"].astype(np.int64)
-
-            if node_features.ndim == 1:
-                node_features = node_features.reshape(-1, 1)
-
-            node_features = np.nan_to_num(node_features, nan=0.0, posinf=0.0, neginf=0.0)
-            num_nodes = int(node_features.shape[0])
-            if num_nodes == 0 or num_nodes > max_nodes:
-                continue
-
-            graphs.append(
-                GraphWindow(
-                    x=torch.tensor(node_features, dtype=torch.float32),
-                    edges_undirected=edge_index_to_undirected(edge_index, num_nodes=num_nodes),
-                    num_nodes=num_nodes,
-                    window_start=len(graphs),
-                    label=label,
-                    file_name=path.name,
-                )
-            )
-            if max_graphs is not None and max_graphs > 0 and len(graphs) >= max_graphs:
-                break
-        except Exception as exc:
-            print(f"[WARN] skipped {path.name}: {exc}", flush=True)
-
-    if not graphs:
-        raise RuntimeError(f"No usable .npz graphs loaded from {graph_dir}")
-    return graphs
-
-
-def clone_graphs(graphs: Sequence[GraphWindow]) -> List[GraphWindow]:
-    return [
-        GraphWindow(
-            x=g.x.clone(),
-            edges_undirected=g.edges_undirected.clone(),
-            num_nodes=g.num_nodes,
-            window_start=g.window_start,
-            label=g.label,
-            file_name=g.file_name,
-        )
-        for g in graphs
-    ]
-
-
-def standardize_from_train(train_graphs: List[GraphWindow], all_graphs: List[GraphWindow]) -> None:
-    xs = torch.cat([g.x for g in train_graphs], dim=0)
-    mean = xs.mean(dim=0, keepdim=True)
-    std = xs.std(dim=0, keepdim=True).clamp_min(1e-6)
-    for g in all_graphs:
-        g.x = torch.nan_to_num((g.x - mean) / std, nan=0.0, posinf=0.0, neginf=0.0)
-
-
-def split_for_all_models(
-    graphs: List[GraphWindow],
-    seed: int,
-    train_ratio: float,
-    val_ratio: float,
-    benign_limit: Optional[int],
-    mal_limit: Optional[int],
-) -> Tuple[List[GraphWindow], List[GraphWindow], List[GraphWindow]]:
-    rng = random.Random(seed)
-
-    benign = [g for g in graphs if g.label == 0]
-    malicious = [g for g in graphs if g.label == 1]
-
-    rng.shuffle(benign)
-    rng.shuffle(malicious)
-
-    if benign_limit is not None and benign_limit > 0:
-        benign = benign[:benign_limit]
-    if mal_limit is not None and mal_limit > 0:
-        malicious = malicious[:mal_limit]
-
-    if len(benign) < 3:
-        raise RuntimeError("Need at least three benign graphs.")
-    if len(malicious) < 2:
-        raise RuntimeError("Need at least two malicious graphs.")
-
-    all_selected = benign + malicious
-    y = np.array([g.label for g in all_selected], dtype=np.int64)
-    idx = np.arange(len(all_selected))
-
-    test_size = 1.0 - train_ratio - val_ratio
-    if test_size <= 0:
-        raise RuntimeError("TRAIN_RATIO + VAL_RATIO must be less than 1.0")
-
-    strat = y if len(np.unique(y)) > 1 and np.min(np.bincount(y)) >= 3 else None
-    train_idx, temp_idx, _y_train, y_temp = train_test_split(
-        idx,
-        y,
-        test_size=(1.0 - train_ratio),
-        random_state=seed,
-        stratify=strat,
-    )
-
-    val_fraction_of_temp = val_ratio / (val_ratio + test_size)
-    strat_temp = y_temp if len(np.unique(y_temp)) > 1 and np.min(np.bincount(y_temp)) >= 2 else None
-    val_idx, test_idx, _, _ = train_test_split(
-        temp_idx,
-        y_temp,
-        test_size=(1.0 - val_fraction_of_temp),
-        random_state=seed,
-        stratify=strat_temp,
-    )
-
-    train_graphs = [all_selected[i] for i in train_idx]
-    val_graphs = [all_selected[i] for i in val_idx]
-    test_graphs = [all_selected[i] for i in test_idx]
-
-    if not any(g.label == 0 for g in train_graphs):
-        raise RuntimeError("Training split has no benign graphs. Increase data size or adjust seed.")
-    return train_graphs, val_graphs, test_graphs
-
-
-# =========================================================
-# Graph neural network layers and encoders
-# =========================================================
-def build_sparse_a_hat_from_undirected(
-    n: int,
-    edges_undirected: torch.Tensor,
-    add_self_loops: bool = True,
-) -> torch.Tensor:
-    if n <= 0:
-        n = 1
-        edges_undirected = torch.zeros((2, 0), dtype=torch.long)
-
-    if edges_undirected.numel() == 0:
-        if add_self_loops:
-            idx = torch.arange(n, dtype=torch.long)
-            indices = torch.stack([idx, idx], dim=0)
-            values = torch.ones(n, dtype=torch.float32)
-        else:
-            indices = torch.zeros((2, 0), dtype=torch.long)
-            values = torch.zeros((0,), dtype=torch.float32)
-    else:
-        u = edges_undirected[0]
-        v = edges_undirected[1]
-        src = torch.cat([u, v], dim=0)
-        dst = torch.cat([v, u], dim=0)
-        indices = torch.stack([src, dst], dim=0)
-        values = torch.ones(indices.shape[1], dtype=torch.float32)
-        if add_self_loops:
-            idx = torch.arange(n, dtype=torch.long)
-            self_indices = torch.stack([idx, idx], dim=0)
-            indices = torch.cat([indices, self_indices], dim=1)
-            values = torch.cat([values, torch.ones(n, dtype=torch.float32)], dim=0)
-
-    a = torch.sparse_coo_tensor(indices, values, (n, n)).coalesce()
-    d = torch.sparse.sum(a, dim=1).to_dense().clamp_min(1.0)
-    d_inv_sqrt = torch.pow(d, -0.5)
-    row, col = a.indices()
-    norm_vals = a.values() * d_inv_sqrt[row] * d_inv_sqrt[col]
-    return torch.sparse_coo_tensor(a.indices(), norm_vals, (n, n)).coalesce()
-
-
-class GCN(torch.nn.Module):
-    """Small GCN encoder retained for TopoGCL embeddings."""
-
-    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int) -> None:
-        super().__init__()
-        self.w1 = torch.nn.Linear(in_dim, hidden_dim)
-        self.w2 = torch.nn.Linear(hidden_dim, out_dim)
-        self.output_dim = out_dim
-
-    def forward(self, x: torch.Tensor, a_hat: torch.Tensor) -> torch.Tensor:
-        h = torch.relu(torch.sparse.mm(a_hat, self.w1(x)))
-        h = torch.sparse.mm(a_hat, self.w2(h))
-        return h.mean(dim=0)
 
 
 class InfoGraphFF(torch.nn.Module):
@@ -704,402 +447,18 @@ def train_graphcl_scores(
 # =========================================================
 # TopoGCL/TopoIDS-style contrastive graph scoring already in the pipeline.
 # =========================================================
-def loss_cal(z1: torch.Tensor, z2: torch.Tensor, zt1: torch.Tensor, zt2: torch.Tensor, tau: float) -> torch.Tensor:
-    z1_abs = z1.norm(dim=1).clamp_min(1e-12)
-    z2_abs = z2.norm(dim=1).clamp_min(1e-12)
-    sim = torch.exp(torch.einsum("ik,jk->ij", z1, z2) / torch.einsum("i,j->ij", z1_abs, z2_abs) / tau)
-    pos = sim[range(z1.size(0)), range(z1.size(0))]
-    loss1 = pos / (sim.sum(dim=1) - pos).clamp_min(1e-12)
-
-    t1_abs = zt1.norm(dim=1).clamp_min(1e-12)
-    t2_abs = zt2.norm(dim=1).clamp_min(1e-12)
-    simt = torch.exp(torch.einsum("ik,jk->ij", zt1, zt2) / torch.einsum("i,j->ij", t1_abs, t2_abs) / tau)
-    post = simt[range(zt1.size(0)), range(zt1.size(0))]
-    loss2 = post / (simt.sum(dim=1) - post).clamp_min(1e-12)
-    return (-torch.log((loss1 + 0.1 * loss2).clamp_min(1e-12))).mean()
-
-
-def train_topogcl_encoder(
-    model: GCN,
-    graphs: List[GraphWindow],
-    config: ExperimentConfig,
-    aug_config: ModelAugmentationConfig,
-    seed: int,
-    device: torch.device,
-) -> None:
-    model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr_topogcl)
-    rng = torch.Generator().manual_seed(seed)
-    indices = torch.arange(len(graphs))
-
-    for epoch in range(config.epochs_topogcl):
-        permutation = indices[torch.randperm(len(graphs), generator=rng)]
-        total_loss = 0.0
-        seen = 0
-        for start in range(0, len(graphs), aug_config.batch_size):
-            batch_indices = permutation[start : start + aug_config.batch_size].tolist()
-            if len(batch_indices) < 2:
-                continue
-            z1_list: List[torch.Tensor] = []
-            z2_list: List[torch.Tensor] = []
-            zt1_list: List[torch.Tensor] = []
-            zt2_list: List[torch.Tensor] = []
-            for idx in batch_indices:
-                graph = graphs[idx]
-                x1, adj1 = augment_graph_view(graph, aug_config.edge_drop, aug_config.feat_mask, rng)
-                x2, adj2 = augment_graph_view(graph, aug_config.edge_drop, aug_config.feat_mask, rng)
-                x1 = x1.to(device)
-                x2 = x2.to(device)
-                adj1 = adj1.to(device)
-                adj2 = adj2.to(device)
-                z1_list.append(model(x1, adj1))
-                z2_list.append(model(x2, adj2))
-                x1_topo = x1.clone()
-                x2_topo = x2.clone()
-                if x1_topo.shape[1] > 3:
-                    x1_topo[:, 3:] = 0.0
-                    x2_topo[:, 3:] = 0.0
-                zt1_list.append(model(x1_topo, adj1))
-                zt2_list.append(model(x2_topo, adj2))
-            loss = loss_cal(
-                torch.stack(z1_list),
-                torch.stack(z2_list),
-                torch.stack(zt1_list),
-                torch.stack(zt2_list),
-                tau=aug_config.tau,
-            )
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += float(loss.item()) * len(batch_indices)
-            seen += len(batch_indices)
-        print(f"    topogcl epoch {epoch + 1}/{config.epochs_topogcl} loss={total_loss / max(seen, 1):.6f}", flush=True)
-
-
-def compute_gcn_embeddings(model: GCN, graphs: List[GraphWindow], device: torch.device, tag: str) -> torch.Tensor:
-    embeddings: List[torch.Tensor] = []
-    model.eval()
-    with torch.no_grad():
-        for idx, graph in enumerate(graphs):
-            adj = build_sparse_a_hat_from_undirected(graph.num_nodes, graph.edges_undirected).to(device)
-            embeddings.append(model(graph.x.to(device), adj).detach())
-            if (idx + 1) % max(1, len(graphs) // 10) == 0:
-                print(f"    {tag}: {idx + 1}/{len(graphs)}", flush=True)
-    return torch.stack(embeddings, dim=0)
-
-
-def train_topogcl_scores(
-    train_graphs: List[GraphWindow],
-    eval_graphs: List[GraphWindow],
-    in_dim: int,
-    config: ExperimentConfig,
-    seed: int,
-    device: torch.device,
-) -> np.ndarray:
-    train_benign = [g for g in train_graphs if g.label == 0]
-    if len(train_benign) < 2:
-        raise RuntimeError("TopoGCL needs at least two benign graphs in the train split.")
-    model = GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.emb_dim)
-    aug_config = get_model_augmentation_config("topogcl", config)
-    train_topogcl_encoder(model=model, graphs=train_benign, config=config, aug_config=aug_config, seed=seed, device=device)
-    train_emb = compute_gcn_embeddings(model, train_benign, device=device, tag="embed topogcl train benign")
-    eval_emb = compute_gcn_embeddings(model, eval_graphs, device=device, tag="embed topogcl eval")
-    center = train_emb.mean(dim=0)
-    return torch.norm(eval_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32)
-
-
-class GraphSAGEEncoder(torch.nn.Module):
-    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int) -> None:
-        super().__init__()
-        self.self1 = torch.nn.Linear(in_dim, hidden_dim)
-        self.neigh1 = torch.nn.Linear(in_dim, hidden_dim)
-        self.self2 = torch.nn.Linear(hidden_dim, out_dim)
-        self.neigh2 = torch.nn.Linear(hidden_dim, out_dim)
-        self.output_dim = out_dim
-
-    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        h = torch.relu(self.self1(x) + self.neigh1(torch.sparse.mm(adj, x)))
-        h = torch.relu(self.self2(h) + self.neigh2(torch.sparse.mm(adj, h)))
-        return h.mean(dim=0)
-
-
-class GraphClassifier(torch.nn.Module):
-    def __init__(self, encoder: torch.nn.Module, emb_dim: int) -> None:
-        super().__init__()
-        self.encoder = encoder
-        self.head = torch.nn.Linear(emb_dim, 2)
-
-    def forward(self, graph: GraphWindow, device: torch.device) -> torch.Tensor:
-        adj = build_sparse_a_hat_from_undirected(graph.num_nodes, graph.edges_undirected).to(device)
-        z = self.encoder(graph.x.to(device), adj)
-        return self.head(z)
-
-
-def train_supervised_graph_model(
-    model_name: str,
-    encoder_factory: Callable[[], torch.nn.Module],
-    train_graphs: List[GraphWindow],
-    hidden_dim: int,
-    epochs: int,
-    lr: float,
-    seed: int,
-    device: torch.device,
-) -> GraphClassifier:
-    torch.manual_seed(seed)
-    rng = random.Random(seed)
-    classifier = GraphClassifier(encoder_factory(), emb_dim=hidden_dim).to(device)
-    optimizer = torch.optim.Adam(classifier.parameters(), lr=lr)
-
-    for epoch in range(epochs):
-        classifier.train()
-        shuffled = train_graphs[:]
-        rng.shuffle(shuffled)
-        total_loss = 0.0
-        for graph in shuffled:
-            logits = classifier(graph, device).unsqueeze(0)
-            target = torch.tensor([graph.label], dtype=torch.long, device=device)
-            loss = torch.nn.functional.cross_entropy(logits, target)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += float(loss.item())
-        print(f"    {model_name} epoch {epoch + 1}/{epochs} loss={total_loss / max(len(shuffled), 1):.6f}", flush=True)
-    return classifier
-
-
-def predict_supervised_graph_model(
-    classifier: GraphClassifier,
-    eval_graphs: List[GraphWindow],
-    device: torch.device,
-) -> np.ndarray:
-    classifier.eval()
-    scores: List[float] = []
-    with torch.no_grad():
-        for graph in eval_graphs:
-            logits = classifier(graph, device)
-            scores.append(float(torch.softmax(logits, dim=0)[1].item()))
-    return np.array(scores, dtype=np.float32)
-
-
-# =========================================================
-# Metrics, thresholds, and result writing
-# =========================================================
 def safe_auc(y_true: np.ndarray, y_score: np.ndarray) -> float:
-    if len(np.unique(y_true)) < 2:
+    try:
+        return float(roc_auc_score(y_true, y_score)) if len(np.unique(y_true)) > 1 else float("nan")
+    except ValueError:
         return float("nan")
-    return float(roc_auc_score(y_true, y_score))
 
 
 def safe_auprc(y_true: np.ndarray, y_score: np.ndarray) -> float:
-    if len(np.unique(y_true)) < 2:
+    try:
+        return float(average_precision_score(y_true, y_score)) if len(np.unique(y_true)) > 1 else float("nan")
+    except ValueError:
         return float("nan")
-    return float(average_precision_score(y_true, y_score))
-
-
-def best_threshold_from_validation(y_true: np.ndarray, y_score: np.ndarray) -> float:
-    if y_score.size == 0:
-        return 0.5
-    candidates = np.unique(y_score)
-    if candidates.size == 1:
-        return float(candidates[0])
-    best_threshold = float(candidates[0])
-    best_f1 = -1.0
-    for threshold in candidates:
-        y_pred = (y_score >= threshold).astype(np.int64)
-        score = float(f1_score(y_true, y_pred, zero_division=0))
-        if score > best_f1:
-            best_f1 = score
-            best_threshold = float(threshold)
-    return best_threshold
-
-
-def compute_metrics(y_true: np.ndarray, y_score: np.ndarray, threshold: float) -> Dict[str, float]:
-    y_pred = (y_score >= threshold).astype(np.int64)
-    return {
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "precision": float(precision_score(y_true, y_pred, zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
-        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
-        "auroc": safe_auc(y_true, y_score),
-        "auprc": safe_auprc(y_true, y_score),
-    }
-
-
-def summarize_metrics(metrics_list: List[Dict[str, float]]) -> Dict[str, float]:
-    summary: Dict[str, float] = {}
-    for name in METRIC_NAMES:
-        values = np.array([metrics[name] for metrics in metrics_list], dtype=np.float64)
-        summary[f"{name}_mean"] = float(np.nanmean(values))
-        summary[f"{name}_std"] = float(np.nanstd(values))
-    return summary
-
-
-def read_existing_csv_rows(path: Path) -> List[Dict[str, str]]:
-    if not path.exists():
-        return []
-    with path.open(newline="") as f:
-        return [dict(row) for row in csv.DictReader(f)]
-
-
-def write_summary_csv(path: Path, rows: List[Dict[str, object]], append: bool) -> None:
-    merged_rows: List[Dict[str, object]] = []
-    if append:
-        incoming_keys = {(str(row["dataset"]), str(row["train_ratio"]), str(row["model"])) for row in rows}
-        for existing in read_existing_csv_rows(path):
-            existing_key = (
-                str(existing.get("dataset", "")),
-                str(existing.get("train_ratio", "")),
-                str(existing.get("model", "")),
-            )
-            if existing_key not in incoming_keys:
-                merged_rows.append(existing)
-    merged_rows.extend(rows)
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
-        writer.writeheader()
-        for row in merged_rows:
-            writer.writerow({field: row.get(field, "") for field in CSV_FIELDNAMES})
-
-
-def make_score_rows(
-    dataset: str,
-    train_ratio: float,
-    seed: int,
-    model_name: str,
-    val_scores: np.ndarray,
-    test_scores: np.ndarray,
-    y_val: np.ndarray,
-    y_test: np.ndarray,
-) -> List[Dict[str, object]]:
-    rows: List[Dict[str, object]] = []
-    max_len = max(len(val_scores), len(test_scores), len(y_val), len(y_test))
-    for idx in range(max_len):
-        rows.append(
-            {
-                "dataset": dataset,
-                "train_ratio": train_ratio,
-                "seed": seed,
-                "model": model_name,
-                "index": idx,
-                "val_score": float(val_scores[idx]) if idx < len(val_scores) else "",
-                "y_val": int(y_val[idx]) if idx < len(y_val) else "",
-                "test_score": float(test_scores[idx]) if idx < len(test_scores) else "",
-                "y_test": int(y_test[idx]) if idx < len(y_test) else "",
-            }
-        )
-    return rows
-
-
-def write_scores_csv(path: Path, rows: List[Dict[str, object]], append: bool) -> None:
-    merged_rows: List[Dict[str, object]] = []
-    if append:
-        incoming_run_keys = {
-            (
-                str(row["dataset"]),
-                str(row["train_ratio"]),
-                str(row["seed"]),
-                str(row["model"]),
-            )
-            for row in rows
-        }
-        for existing in read_existing_csv_rows(path):
-            existing_run_key = (
-                str(existing.get("dataset", "")),
-                str(existing.get("train_ratio", "")),
-                str(existing.get("seed", "")),
-                str(existing.get("model", "")),
-            )
-            if existing_run_key not in incoming_run_keys:
-                merged_rows.append(existing)
-    merged_rows.extend(rows)
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SCORE_CSV_FIELDNAMES)
-        writer.writeheader()
-        for row in merged_rows:
-            writer.writerow({field: row.get(field, "") for field in SCORE_CSV_FIELDNAMES})
-
-
-def default_scores_csv_path(out_csv: Path) -> Path:
-    if "summary" in out_csv.stem:
-        return out_csv.with_name(out_csv.name.replace("summary", "scores", 1))
-    return out_csv.with_name(f"{out_csv.stem}_scores{out_csv.suffix or '.csv'}")
-
-
-EXTERNAL_METRIC_PATTERNS = {
-    "accuracy": ("accuracy", "acc"),
-    "precision": ("precision", "prec"),
-    "recall": ("recall", "rec"),
-    "f1": ("f1", "f1_score", "f1-score"),
-    "auroc": ("auroc", "roc_auc", "roc-auc", "auc"),
-    "auprc": ("auprc", "average_precision", "avg_precision", "ap"),
-}
-
-
-def normalize_external_dataset_name(dataset: str) -> str:
-    """Map display names to TU-style dataset identifiers accepted by external repos."""
-    return (
-        dataset.replace("NF-", "NF_")
-        .replace("-", "_")
-        .replace(" ", "_")
-        .replace("%", "")
-    )
-
-
-def parse_external_metrics(output: str) -> Dict[str, float]:
-    metrics: Dict[str, float] = {}
-    for canonical, aliases in EXTERNAL_METRIC_PATTERNS.items():
-        matches: List[float] = []
-        for alias in aliases:
-            pattern = rf"(?i)(?:^|[^a-z0-9_]){re.escape(alias)}(?:[^a-z0-9_]|$)\s*[:=,\t ]+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
-            matches.extend(float(match) for match in re.findall(pattern, output))
-        if matches:
-            value = matches[-1]
-            metrics[canonical] = value / 100.0 if value > 1.0 and value <= 100.0 else value
-    missing = [name for name in METRIC_NAMES if name not in metrics]
-    if missing:
-        raise RuntimeError(
-            "Could not parse external metrics "
-            f"{missing}. Expected keys like accuracy, precision, recall, f1, auroc, and auprc in output."
-        )
-    return metrics
-
-
-def run_external_command(model_name: str, command: List[str], workdir: Path) -> Dict[str, float]:
-    if not workdir.exists():
-        raise FileNotFoundError(f"{model_name} directory not found: {workdir}")
-    print(f"    running {model_name}: {' '.join(command)} (cwd={workdir})", flush=True)
-    completed = subprocess.run(
-        command,
-        cwd=workdir,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
-    print(completed.stdout, flush=True)
-    if completed.returncode != 0:
-        raise RuntimeError(f"{model_name} command failed with exit code {completed.returncode}")
-    return parse_external_metrics(completed.stdout)
-
-
-def run_rgcl_external(config: ExperimentConfig, seed: int) -> Dict[str, float]:
-    dataset_name = normalize_external_dataset_name(config.dataset)
-    command = ["python", "rgcl.py", "--seed", str(seed), "--DS", dataset_name]
-    dataset_key = dataset_name.lower()
-    if dataset_key in {"nf_ton_iot", "nf_bot_iot"}:
-        command.extend(["--graph-dir", str(config.graph_dir)])
-        print(f"    RGCL source: local .npz graphs ({config.graph_dir})", flush=True)
-    else:
-        print(f"    RGCL source: TU dataset ({dataset_name})", flush=True)
-    return run_external_command(
-        model_name="rgcl",
-        command=command,
-        workdir=config.rgcl_dir,
-    )
 
 
 def model_runner(
@@ -1112,12 +471,6 @@ def model_runner(
     seed: int,
     device: torch.device,
 ) -> Tuple[np.ndarray, np.ndarray] | Dict[str, float]:
-    if model_name in {"gnn", "graphsage"}:
-        raise ValueError(
-            f"{model_name} is supervised and is intentionally not supported in "
-            "train_ids_cl_baselines.py. Use train_ids_gnn.py for the base GNN baseline."
-        )
-
     if model_name == "graphcl":
         aug_config = get_model_augmentation_config(model_name, config)
         log_augmentation_config(model_name, aug_config)
@@ -1146,31 +499,6 @@ def model_runner(
             torch.norm(val_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32),
             torch.norm(test_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32),
         )
-
-    if model_name == "topogcl":
-        aug_config = get_model_augmentation_config(model_name, config)
-        log_augmentation_config(model_name, aug_config)
-        train_benign = [g for g in train_graphs if g.label == 0]
-        if len(train_benign) < 2:
-            raise RuntimeError("TopoGCL needs at least two benign graphs in the train split.")
-        model = GCN(in_dim=in_dim, hidden_dim=config.hidden_dim, out_dim=config.emb_dim)
-        train_topogcl_encoder(
-            model=model,
-            graphs=train_benign,
-            config=config,
-            aug_config=aug_config,
-            seed=seed,
-            device=device,
-        )
-        train_emb = compute_gcn_embeddings(model, train_benign, device=device, tag="embed topogcl train benign")
-        center = train_emb.mean(dim=0)
-        val_emb = compute_gcn_embeddings(model, val_graphs, device=device, tag="embed topogcl val")
-        test_emb = compute_gcn_embeddings(model, test_graphs, device=device, tag="embed topogcl test")
-        return (
-            torch.norm(val_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32),
-            torch.norm(test_emb - center, p=2, dim=1).detach().cpu().numpy().astype(np.float32),
-        )
-
     if model_name == "infograph":
         return train_infograph_ids(
             train_graphs=train_graphs,
@@ -1180,39 +508,36 @@ def model_runner(
             seed=seed,
             device=device,
         )
-
-    if model_name == "rgcl":
-        metrics = run_rgcl_external(config=config, seed=seed)
-        return metrics
-
-    raise ValueError(f"Unknown graph model: {model_name}")
+    raise ValueError(f"Unknown or unsupported CL model: {model_name}")
 
 
-def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[OK] device: {device}", flush=True)
+def dataset_names(selection: str) -> Tuple[str, ...]:
+    return ("streamspot", "grasec") if selection == "all" else (selection,)
+
+
+def run_dataset(dataset: str, config: ExperimentConfig, device: torch.device) -> tuple[Dict[str, object], List[Dict[str, object]], List[Dict[str, object]]]:
+    load_seed = config.seeds[0] if config.seeds else 42
     max_graphs = config.max_graphs if config.max_graphs > 0 else None
     benign_limit = config.benign_limit if config.benign_limit > 0 else None
     mal_limit = config.mal_limit if config.mal_limit > 0 else None
-    base_graphs = load_npz_graphs(config.graph_dir, max_graphs=max_graphs, max_nodes=config.max_nodes)
-    print(f"[OK] dataset={config.dataset} graph_dir={config.graph_dir}", flush=True)
+    base_graphs = load_dataset_graphs(dataset, data_root=config.data_root, seed=load_seed, max_nodes=config.max_nodes)
+    if max_graphs is not None:
+        base_graphs = base_graphs[:max_graphs]
+    print(f"[OK] dataset={dataset} data_root={config.data_root}", flush=True)
     print(f"[OK] total graphs loaded: {len(base_graphs)}", flush=True)
 
     summary_rows: List[Dict[str, object]] = []
     score_rows: List[Dict[str, object]] = []
     all_details: Dict[str, object] = {}
-
     for train_ratio in config.train_ratios:
         ratio_key = f"{train_ratio:.4g}"
         all_details[ratio_key] = {"models": {}, "split": {}, "labels": {}}
         per_model_metrics: Dict[str, List[Dict[str, float]]] = {model: [] for model in config.models}
-
         for seed in config.seeds:
-            print(f"\n[RUN] dataset={config.dataset} train_ratio={train_ratio} seed={seed}", flush=True)
+            print(f"\n[RUN] dataset={dataset} train_ratio={train_ratio} seed={seed}", flush=True)
             torch.manual_seed(seed)
             np.random.seed(seed)
             random.seed(seed)
-
             graphs = clone_graphs(base_graphs)
             train_graphs, val_graphs, test_graphs = split_for_all_models(
                 graphs=graphs,
@@ -1224,7 +549,6 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
             )
             if config.standardize:
                 standardize_from_train(train_graphs, train_graphs + val_graphs + test_graphs)
-
             if not all_details[ratio_key]["split"]:
                 all_details[ratio_key]["split"] = {
                     "train": len(train_graphs),
@@ -1241,67 +565,52 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
                     "test_benign": int(sum(g.label == 0 for g in test_graphs)),
                     "test_malicious": int(sum(g.label == 1 for g in test_graphs)),
                 }
-
             in_dim = train_graphs[0].x.shape[1]
             y_val = np.array([g.label for g in val_graphs], dtype=np.int64)
             y_test = np.array([g.label for g in test_graphs], dtype=np.int64)
-
             for model_name in config.models:
-                print(f"[MODEL] dataset={config.dataset} train_ratio={train_ratio} model={model_name}", flush=True)
-                result = model_runner(
-                    model_name=model_name,
-                    train_graphs=train_graphs,
-                    val_graphs=val_graphs,
-                    test_graphs=test_graphs,
-                    in_dim=in_dim,
-                    config=config,
-                    seed=seed,
-                    device=device,
-                )
-                if isinstance(result, dict):
-                    metrics = result
-                else:
-                    val_scores, test_scores = result
-                    score_rows.extend(
-                        make_score_rows(
-                            dataset=config.dataset,
-                            train_ratio=train_ratio,
-                            seed=seed,
-                            model_name=model_name,
-                            val_scores=val_scores,
-                            test_scores=test_scores,
-                            y_val=y_val,
-                            y_test=y_test,
-                        )
-                    )
+                print(f"[MODEL] dataset={dataset} train_ratio={train_ratio} model={model_name}", flush=True)
+                output = model_runner(model_name, train_graphs, val_graphs, test_graphs, in_dim, config, seed, device)
+                if isinstance(output, tuple):
+                    val_scores, test_scores = output
                     threshold = best_threshold_from_validation(y_val, val_scores)
                     metrics = compute_metrics(y_test, test_scores, threshold=threshold)
                     metrics["threshold"] = threshold
-                per_model_metrics[model_name].append(metrics)
-
+                    per_model_metrics[model_name].append(metrics)
+                    score_rows.extend(make_score_rows(dataset, train_ratio, seed, model_name, y_val, val_scores, y_test, test_scores))
+                else:
+                    per_model_metrics[model_name].append(output)
         for model_name, metrics_list in per_model_metrics.items():
             summary = summarize_metrics(metrics_list)
-            summary_rows.append({"dataset": config.dataset, "train_ratio": train_ratio, "model": model_name, **summary})
+            summary_rows.append({"dataset": dataset, "train_ratio": train_ratio, "model": model_name, **summary})
             all_details[ratio_key]["models"][model_name] = {"runs": metrics_list, "summary": summary}
+    return {"dataset": dataset, "data_root": str(config.data_root), "num_graphs_loaded": len(base_graphs), "runs_by_train_ratio": all_details}, summary_rows, score_rows
 
+
+def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[OK] device: {device}", flush=True)
+    details_by_dataset: Dict[str, object] = {}
+    summary_rows: List[Dict[str, object]] = []
+    score_rows: List[Dict[str, object]] = []
+    for dataset in dataset_names(config.dataset):
+        details, ds_summary_rows, ds_score_rows = run_dataset(dataset, config, device)
+        details_by_dataset[dataset] = details
+        summary_rows.extend(ds_summary_rows)
+        score_rows.extend(ds_score_rows)
     results = {
         "dataset": config.dataset,
-        "graph_dir": str(config.graph_dir),
+        "data_root": str(config.data_root),
         "device": str(device),
-        "num_graphs_loaded": len(base_graphs),
         "train_ratios": list(config.train_ratios),
-        "runs_by_train_ratio": all_details,
+        "datasets": details_by_dataset,
         "training": {
             "models": list(config.models),
             "epochs_graphcl": config.epochs_graphcl,
-            "epochs_topogcl": config.epochs_topogcl,
             "epochs_infograph": config.epochs_infograph,
             "lr_graphcl": config.lr_graphcl,
-            "lr_topogcl": config.lr_topogcl,
             "lr_infograph": config.lr_infograph,
             "infograph_layers": config.infograph_layers,
-            "infograph_dir": str(config.infograph_dir),
-            "rgcl_dir": str(config.rgcl_dir),
             "hidden_dim": config.hidden_dim,
             "emb_dim": config.emb_dim,
             "graphcl_layers": config.graphcl_layers,
@@ -1317,10 +626,9 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
             "max_nodes": config.max_nodes,
         },
     }
-
     config.out_json.parent.mkdir(parents=True, exist_ok=True)
-    with config.out_json.open("w") as f:
-        json.dump(results, f, indent=2)
+    with config.out_json.open("w", encoding="utf-8") as handle:
+        json.dump(results, handle, indent=2)
     write_summary_csv(config.out_csv, summary_rows, append=True)
     write_scores_csv(config.out_scores_csv, score_rows, append=True)
     print(f"\n[OK] wrote {config.out_json}", flush=True)
@@ -1329,51 +637,26 @@ def run_experiment(config: ExperimentConfig) -> Dict[str, object]:
     return results
 
 
-def infer_dataset_name(graph_dir: Path) -> str:
-    graph_dir_text = str(graph_dir).lower()
-    if "bot" in graph_dir_text:
-        return "NF-BoT-IoT"
-    if "ton" in graph_dir_text:
-        return "NF-ToN-IoT"
-    return graph_dir.parent.name or "graph_dataset"
-
-
-def parse_float_tuple(raw: str) -> Tuple[float, ...]:
-    return tuple(float(item.strip()) for item in raw.split(",") if item.strip())
-
-
-def parse_int_tuple(raw: str) -> Tuple[int, ...]:
-    return tuple(int(item.strip()) for item in raw.split(",") if item.strip())
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train contrastive/self-supervised IDS baselines on existing graph classification .npz files.")
-    parser.add_argument("--graph-dir", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/datasets/NF-BoT-IoT/Graph"))
-    parser.add_argument("--dataset", default=None)
-    parser.add_argument("--out-json", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_results_25%.json"))
-    parser.add_argument("--out-csv", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_summary_25%.csv"))
-    parser.add_argument(
-        "--out-scores-csv",
-        type=Path,
-        default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/results/nf_bot_iot/bot_out_scores_25%.csv"),
-        help="CSV path for per-run validation/test scores and labels. Defaults beside --out-csv.",
-    )
-    parser.add_argument("--train-ratios", default="0.25")
-    parser.add_argument("--val-ratio", type=float, default=0.15)
+    parser = argparse.ArgumentParser(description="Train contrastive IDS baselines on StreamSpot and/or GraSec-IoT graphs.")
+    parser.add_argument("--dataset", choices=DATASET_CHOICES, default="all")
+    parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
+    parser.add_argument("--out-json", type=Path, default=Path("results/ids_cl_baselines/metrics.json"))
+    parser.add_argument("--out-csv", type=Path, default=Path("results/ids_cl_baselines/summary.csv"))
+    parser.add_argument("--out-scores-csv", type=Path, default=Path("results/ids_cl_baselines/scores.csv"))
+    parser.add_argument("--train-ratios", default="0.8")
+    parser.add_argument("--val-ratio", type=float, default=0.1)
     parser.add_argument("--seeds", default="42,43")
-    parser.add_argument("--models", default="graphcl,topogcl,infograph,rgcl", help="Comma-separated CL baseline models: graphcl,topogcl,infograph,rgcl")
-    parser.add_argument("--epochs-graphcl", type=int, default=10)
-    parser.add_argument("--epochs-topogcl", type=int, default=10)
-    parser.add_argument("--epochs-infograph", type=int, default=10)
+    parser.add_argument("--models", default="graphcl,infograph", help="Comma-separated CL baseline models: graphcl,infograph")
+    parser.add_argument("--epochs", type=int, default=None, help="Shared epoch count for GraphCL and InfoGraph when model-specific values are not supplied.")
+    parser.add_argument("--epochs-graphcl", type=int, default=None)
+    parser.add_argument("--epochs-infograph", type=int, default=None)
     parser.add_argument("--lr-graphcl", type=float, default=1e-3)
-    parser.add_argument("--lr-topogcl", type=float, default=1e-3)
     parser.add_argument("--lr-infograph", type=float, default=1e-3)
     parser.add_argument("--infograph-layers", type=int, default=3)
-    parser.add_argument("--infograph-dir", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/InfoGraph/unsupervised"))
-    parser.add_argument("--rgcl-dir", type=Path, default=Path("/home/kiwi-pandas/Documents/IDS_TopoGCL/RGCL/unsupervised_TU"))
     parser.add_argument("--hidden-dim", type=int, default=16)
     parser.add_argument("--emb-dim", type=int, default=16)
-    parser.add_argument("--graphcl-layers", type=int, default=16)
+    parser.add_argument("--graphcl-layers", type=int, default=3)
     parser.add_argument("--edge-drop", type=float, default=0.001)
     parser.add_argument("--feat-mask", type=float, default=0.005)
     parser.add_argument("--tau", type=float, default=0.05)
@@ -1381,35 +664,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--benign-limit", type=int, default=0)
     parser.add_argument("--mal-limit", type=int, default=0)
     parser.add_argument("--max-graphs", type=int, default=0)
-    parser.add_argument("--max-nodes", type=int, default=50000)
+    parser.add_argument("--max-nodes", type=int, default=512)
     parser.add_argument("--no-standardize", action="store_true")
     return parser.parse_args()
 
 
 def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
     models = tuple(model.strip().lower() for model in args.models.split(",") if model.strip())
-    allowed = {"graphcl", "topogcl", "infograph", "rgcl"}
+    allowed = {"graphcl", "infograph"}
     unknown = set(models) - allowed
     if unknown:
-        raise ValueError(f"Unknown models {sorted(unknown)}; allowed models are {sorted(allowed)}")
+        raise ValueError(f"Unknown or unsupported CL models {sorted(unknown)}; allowed models are {sorted(allowed)}")
+    shared_epochs = 10 if args.epochs is None else args.epochs
     return ExperimentConfig(
-        dataset=args.dataset or infer_dataset_name(args.graph_dir),
-        graph_dir=args.graph_dir,
+        dataset=args.dataset,
+        data_root=args.data_root,
         out_json=args.out_json,
         out_csv=args.out_csv,
-        out_scores_csv=args.out_scores_csv or default_scores_csv_path(args.out_csv),
+        out_scores_csv=args.out_scores_csv,
         train_ratios=parse_float_tuple(args.train_ratios),
         val_ratio=args.val_ratio,
         seeds=parse_int_tuple(args.seeds),
-        epochs_graphcl=args.epochs_graphcl,
-        epochs_topogcl=args.epochs_topogcl,
-        epochs_infograph=args.epochs_infograph,
+        epochs_graphcl=shared_epochs if args.epochs_graphcl is None else args.epochs_graphcl,
+        epochs_infograph=shared_epochs if args.epochs_infograph is None else args.epochs_infograph,
         lr_graphcl=args.lr_graphcl,
-        lr_topogcl=args.lr_topogcl,
         lr_infograph=args.lr_infograph,
         infograph_layers=args.infograph_layers,
-        infograph_dir=args.infograph_dir,
-        rgcl_dir=args.rgcl_dir,
         hidden_dim=args.hidden_dim,
         emb_dim=args.emb_dim,
         graphcl_layers=args.graphcl_layers,
