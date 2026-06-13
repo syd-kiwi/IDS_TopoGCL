@@ -40,6 +40,12 @@ CSV_FIELDNAMES = [
     "auroc_std",
     "auprc_mean",
     "auprc_std",
+    "fpr_mean",
+    "fpr_std",
+    "threshold_mean",
+    "threshold_std",
+    "val_f1_mean",
+    "val_f1_std",
 ]
 SCORE_CSV_FIELDNAMES = [
     "dataset",
