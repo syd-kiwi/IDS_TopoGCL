@@ -1,0 +1,200 @@
+{
+  "dataset": "all",
+  "data_root": "../data",
+  "device": "cuda",
+  "train_ratios": [
+    0.8
+  ],
+  "datasets": {
+    "streamspot": {
+      "dataset": "streamspot",
+      "data_root": "../data",
+      "num_graphs_loaded": 600,
+      "runs_by_train_ratio": {
+        "0.8": {
+          "models": {
+            "graphcl": {
+              "runs": [
+                {
+                  "accuracy": 0.9666666666666667,
+                  "precision": 1.0,
+                  "recall": 0.8,
+                  "f1": 0.8888888888888888,
+                  "auroc": 1.0,
+                  "auprc": 0.9999999999999999,
+                  "fpr": 0.0,
+                  "threshold": 0.3116658627986908,
+                  "val_f1": 1.0
+                },
+                {
+                  "accuracy": 0.9666666666666667,
+                  "precision": 1.0,
+                  "recall": 0.8,
+                  "f1": 0.8888888888888888,
+                  "auroc": 1.0,
+                  "auprc": 0.9999999999999999,
+                  "fpr": 0.0,
+                  "threshold": 0.3635033071041107,
+                  "val_f1": 1.0
+                },
+                {
+                  "accuracy": 1.0,
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "auroc": 1.0,
+                  "auprc": 0.9999999999999999,
+                  "fpr": 0.0,
+                  "threshold": 0.2593328356742859,
+                  "val_f1": 1.0
+                }
+              ],
+              "summary": {
+                "accuracy_mean": 0.9777777777777779,
+                "accuracy_std": 0.01571348402636772,
+                "precision_mean": 1.0,
+                "precision_std": 0.0,
+                "recall_mean": 0.8666666666666667,
+                "recall_std": 0.09428090415820632,
+                "f1_mean": 0.9259259259259259,
+                "f1_std": 0.05237828008789243,
+                "auroc_mean": 1.0,
+                "auroc_std": 0.0,
+                "auprc_mean": 0.9999999999999999,
+                "auprc_std": 0.0,
+                "fpr_mean": 0.0,
+                "fpr_std": 0.0,
+                "threshold_mean": 0.3115006685256958,
+                "threshold_std": 0.042527577298649095,
+                "val_f1_mean": 1.0,
+                "val_f1_std": 0.0
+              }
+            }
+          },
+          "split": {
+            "train": 480,
+            "val": 60,
+            "test": 60,
+            "train_ratio": 0.8,
+            "val_ratio": 0.1
+          },
+          "labels": {
+            "train_benign": 400,
+            "train_malicious": 80,
+            "val_benign": 50,
+            "val_malicious": 10,
+            "test_benign": 50,
+            "test_malicious": 10
+          }
+        }
+      }
+    },
+    "grasec": {
+      "dataset": "grasec",
+      "data_root": "../data",
+      "num_graphs_loaded": 7443,
+      "runs_by_train_ratio": {
+        "0.8": {
+          "models": {
+            "graphcl": {
+              "runs": [
+                {
+                  "accuracy": 0.9691275167785235,
+                  "precision": 0.9842632331902719,
+                  "recall": 0.9828571428571429,
+                  "f1": 0.9835596854896355,
+                  "auroc": 0.9845714285714287,
+                  "auprc": 0.998990079347698,
+                  "fpr": 0.24444444444444444,
+                  "threshold": 0.41375502943992615,
+                  "val_f1": 0.9850958126330731
+                },
+                {
+                  "accuracy": 0.9731543624161074,
+                  "precision": 0.9788732394366197,
+                  "recall": 0.9928571428571429,
+                  "f1": 0.9858156028368794,
+                  "auroc": 0.983015873015873,
+                  "auprc": 0.998893679953762,
+                  "fpr": 0.3333333333333333,
+                  "threshold": 0.32537856698036194,
+                  "val_f1": 0.9851380042462845
+                },
+                {
+                  "accuracy": 0.9704697986577181,
+                  "precision": 0.9815340909090909,
+                  "recall": 0.9871428571428571,
+                  "f1": 0.9843304843304843,
+                  "auroc": 0.9793968253968253,
+                  "auprc": 0.9986265516221118,
+                  "fpr": 0.28888888888888886,
+                  "threshold": 0.42765551805496216,
+                  "val_f1": 0.9885714285714285
+                }
+              ],
+              "summary": {
+                "accuracy_mean": 0.970917225950783,
+                "accuracy_std": 0.0016741196361404853,
+                "precision_mean": 0.9815568545119943,
+                "precision_std": 0.0022005146068310288,
+                "recall_mean": 0.9876190476190475,
+                "recall_std": 0.004096345365258399,
+                "f1_mean": 0.9845685908856664,
+                "f1_std": 0.0009362377967569834,
+                "auroc_mean": 0.9823280423280423,
+                "auroc_std": 0.002167788857337526,
+                "auprc_mean": 0.9988367703078573,
+                "auprc_std": 0.0001537685114389509,
+                "fpr_mean": 0.28888888888888886,
+                "fpr_std": 0.036288736930121156,
+                "threshold_mean": 0.38892970482508343,
+                "threshold_std": 0.04529434281786397,
+                "val_f1_mean": 0.9862684151502621,
+                "val_f1_std": 0.0016285674986750553
+              }
+            }
+          },
+          "split": {
+            "train": 5954,
+            "val": 744,
+            "test": 745,
+            "train_ratio": 0.8,
+            "val_ratio": 0.1
+          },
+          "labels": {
+            "train_benign": 361,
+            "train_malicious": 5593,
+            "val_benign": 45,
+            "val_malicious": 699,
+            "test_benign": 45,
+            "test_malicious": 700
+          }
+        }
+      }
+    }
+  },
+  "training": {
+    "models": [
+      "graphcl"
+    ],
+    "epochs_graphcl": 10,
+    "lr_graphcl": 0.001,
+    "hidden_dim": 16,
+    "graphcl_layers": 3,
+    "edge_drop": 0.001,
+    "feat_mask": 0.005,
+    "tau": 0.05,
+    "batch_size": 8,
+    "knn_k": 5,
+    "standardized": true,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "benign_limit": 0,
+    "mal_limit": 0,
+    "max_graphs": 0,
+    "max_nodes": 512
+  }
+}
