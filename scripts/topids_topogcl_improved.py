@@ -725,7 +725,7 @@ def train_topogcl(train_graphs, args):
     print("Progress: precomputing EPL topology features for train graphs...")
     xi_raw = torch.tensor(topo_matrix(train_graphs, args), dtype=torch.float32)
     topo_mean = xi_raw.mean(dim=0, keepdim=True)
-    topo_std = xi_raw.std(dim=0, keepdim=True).clamp(min=1e-6)
+    topo_std = xi_raw.std(dim=0, keepdim=True, unbiased=False).clamp(min=1e-6)
     xi_base = (xi_raw - topo_mean) / topo_std
     etl = ETL(xi_base.shape[1], args.embed_dim) if args.mode != "graph_only" else None
 
@@ -787,8 +787,8 @@ def embed_graphs(graphs, gin, etl, topo_mean, topo_std, args, chunk: int = 256):
         for i in range(0, len(graphs), chunk):
             sub = graphs[i:i + chunk]
             x, a, b, ng = batch_graphs(sub)
-            readout, _ = gin(x, a, b, ng)
-            H_parts.append(F.normalize(readout, dim=1).numpy())
+            _, z_graph = gin(x, a, b, ng)
+            H_parts.append(F.normalize(z_graph, dim=1).numpy())
         H = np.concatenate(H_parts)
         if args.mode in {"graph_only", "graph_topo"}:
             parts.append(H)
