@@ -1,0 +1,2 @@
+dataset,train_ratio,model,accuracy_mean,accuracy_std,precision_mean,precision_std,recall_mean,recall_std,f1_mean,f1_std,auroc_mean,auroc_std,auprc_mean,auprc_std,fpr_mean,fpr_std,threshold_mean,threshold_std,val_f1_mean,val_f1_std
+wget,0.8,gnn,0.8666666666666668,0.059628479399994376,0.6,0.48989794855663565,0.26666666666666666,0.2260776661041756,0.36666666666666664,0.30550504633038933,0.6606837606837608,0.19842317996171044,0.5296825396825396,0.20023896029357208,,,,,,

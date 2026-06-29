@@ -71,6 +71,112 @@ class GraphWindow:
     file_name: str
 
 
+class _DGLPickleDummy:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.args = args
+        self.kwargs = kwargs
+
+    def __setstate__(self, state: Any) -> None:
+        self.state = state
+        if isinstance(state, dict):
+            self.__dict__.update(state)
+
+
+class _DGLPickleScheme(_DGLPickleDummy):
+    @staticmethod
+    def _reconstruct_scheme(*args: Any) -> tuple[str, tuple[Any, ...]]:
+        return ("scheme", args)
+
+
+class _DGLPickleFrame(_DGLPickleDummy):
+    pass
+
+
+class _DGLPickleColumn(_DGLPickleDummy):
+    pass
+
+
+class _DGLPickleHeteroGraphIndex(_DGLPickleDummy):
+    pass
+
+
+class _DGLPickleHeteroPickleStates(_DGLPickleDummy):
+    pass
+
+
+class _DGLPickleGraph(_DGLPickleDummy):
+    @property
+    def ndata(self) -> Dict[str, torch.Tensor]:
+        frames = getattr(self, "_node_frames", None) or []
+        if not frames:
+            return {}
+        columns = getattr(frames[0], "_columns", {})
+        return {
+            name: column.storage
+            for name, column in columns.items()
+            if hasattr(column, "storage") and torch.is_tensor(column.storage)
+        }
+
+    def num_nodes(self) -> int:
+        frames = getattr(self, "_node_frames", None) or []
+        if frames and hasattr(frames[0], "_num_rows"):
+            return int(frames[0]._num_rows)
+        raise ValueError("DGL pickle graph is missing node frame row count")
+
+    def number_of_nodes(self) -> int:
+        return self.num_nodes()
+
+    def edges(self) -> tuple[torch.Tensor, torch.Tensor]:
+        graph_state = getattr(getattr(self, "_graph", None), "state", None)
+        state = getattr(graph_state, "state", None)
+        if isinstance(state, tuple) and len(state) >= 3:
+            edge_tensors = state[2]
+            if isinstance(edge_tensors, (list, tuple)) and len(edge_tensors) >= 2:
+                return edge_tensors[0], edge_tensors[1]
+        raise ValueError("DGL pickle graph is missing edge tensors")
+
+
+class _LegacyGraphDataset(_DGLPickleDummy):
+    def __len__(self) -> int:
+        return len(self.graphs)
+
+    def __getitem__(self, idx: int) -> tuple[Any, Any]:
+        return self.graphs[idx], self.labels[idx]
+
+
+def _new_dgl_pickle_object(cls: type) -> Any:
+    return cls()
+
+
+class _DGLCompatUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> Any:
+        if module == "utils.loaddata" and name in {"StreamspotDataset", "WgetDataset"}:
+            return _LegacyGraphDataset
+        if module.startswith("dgl"):
+            replacements = {
+                "_new_object": _new_dgl_pickle_object,
+                "DGLGraph": _DGLPickleGraph,
+                "HeteroGraphIndex": _DGLPickleHeteroGraphIndex,
+                "HeteroPickleStates": _DGLPickleHeteroPickleStates,
+                "Frame": _DGLPickleFrame,
+                "Column": _DGLPickleColumn,
+                "Scheme": _DGLPickleScheme,
+            }
+            return replacements.get(name, _DGLPickleDummy)
+        return super().find_class(module, name)
+
+
+def _load_pickle_with_dgl_compat(path: Path) -> Any:
+    with path.open("rb") as handle:
+        try:
+            return pickle.load(handle)
+        except ModuleNotFoundError as exc:
+            if not (exc.name and (exc.name.startswith("dgl") or exc.name == "utils.loaddata")):
+                raise
+            handle.seek(0)
+            return _DGLCompatUnpickler(handle).load()
+
+
 def parse_float_tuple(raw: str) -> Tuple[float, ...]:
     return tuple(float(item.strip()) for item in raw.split(",") if item.strip())
 
@@ -264,8 +370,7 @@ def load_wget_graphs(data_root: Path, seed: int, max_nodes: int) -> List[GraphWi
             "and unzip it into data/wget/ so data/wget/graphs.pkl exists."
         )
     rng = np.random.default_rng(seed)
-    with pkl.open("rb") as handle:
-        raw = pickle.load(handle)
+    raw = _load_pickle_with_dgl_compat(pkl)
     graphs: List[GraphWindow] = []
     for idx, (graph, label) in enumerate(_iter_wget_records(raw)):
         num_nodes = _graph_num_nodes(graph)

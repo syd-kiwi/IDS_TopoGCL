@@ -31,7 +31,6 @@ import argparse
 import csv
 import glob
 import json
-import pickle
 import random
 from dataclasses import dataclass, field
 from functools import partial
@@ -61,6 +60,7 @@ from ids_graph_data import (
     _graph_num_nodes,
     _iter_wget_records,
     _label_to_int,
+    _load_pickle_with_dgl_compat,
     _wget_node_features,
 )
 
@@ -505,8 +505,7 @@ def load_wget(args, seed: int):
             "and unzip it into data/wget/ so data/wget/graphs.pkl exists."
         )
     rng = np.random.default_rng(seed)
-    with pkl.open("rb") as handle:
-        raw = pickle.load(handle)
+    raw = _load_pickle_with_dgl_compat(pkl)
     graphs: list[Graph] = []
     for idx, (graph, label) in enumerate(_iter_wget_records(raw)):
         n = _graph_num_nodes(graph)
