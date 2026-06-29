@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TopIDS — Improved TopoGCL-style IDS anomaly detection for StreamSpot and GraSec.
+TopIDS — Improved TopoGCL-style IDS anomaly detection for StreamSpot, GraSec, and Wget.
 
 This script is intentionally based on topids_topogcl_prototype.py, not the old
 .npz IDS baseline runner. It keeps the real TopoGCL-style pieces:
@@ -15,6 +15,7 @@ This script is intentionally based on topids_topogcl_prototype.py, not the old
 Datasets expected under data/:
   - StreamSpot: data/streamspot/all.tsv
   - GraSec:     data/grasec-iot/graph_json/Graph_JSON/{train,eval,test}/data_*.json
+    - Wget:       data/wget/graphs.pkl
 
 Examples:
   python3 topids_topogcl_improved.py --dataset streamspot --epochs 12 --mode graph_topo
@@ -30,6 +31,7 @@ import argparse
 import csv
 import glob
 import json
+import pickle
 import random
 from dataclasses import dataclass, field
 from functools import partial
@@ -53,6 +55,14 @@ from sklearn.neighbors import NearestNeighbors
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from ids_graph_data import (
+    _graph_edge_index,
+    _graph_num_nodes,
+    _iter_wget_records,
+    _label_to_int,
+    _wget_node_features,
+)
 
 print = partial(print, flush=True)
 
@@ -95,10 +105,10 @@ def parse_csv_strings(raw: str) -> list[str]:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Improved TopoGCL IDS anomaly detection for StreamSpot and GraSec.",
+        description="Improved TopoGCL IDS anomaly detection for StreamSpot, GraSec, and Wget.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--dataset", choices=["streamspot", "grasec", "all"], default="all")
+    p.add_argument("--dataset", choices=["streamspot", "grasec", "wget", "all"], default="all")
     p.add_argument("--data-root", type=Path, default=DEFAULT_DATA)
     p.add_argument("--seed", type=int, default=42, help="Used when --seeds is not provided.")
     p.add_argument("--seeds", default="", help="Comma-separated seeds, e.g., 42,43,44,45,46.")
@@ -486,7 +496,33 @@ def load_grasec(args, seed: int):
     return train, val, test
 
 
-LOADERS = {"streamspot": load_streamspot, "grasec": load_grasec}
+def load_wget(args, seed: int):
+    print("Step 1/4: Loading Wget MAGIC DGL graphs...")
+    pkl = args.data_root / "wget" / "graphs.pkl"
+    if not pkl.exists():
+        raise FileNotFoundError(
+            f"Missing Wget MAGIC graph dataset: {pkl}. Download MAGIC data/wget/graphs.zip "
+            "and unzip it into data/wget/ so data/wget/graphs.pkl exists."
+        )
+    rng = np.random.default_rng(seed)
+    with pkl.open("rb") as handle:
+        raw = pickle.load(handle)
+    graphs: list[Graph] = []
+    for idx, (graph, label) in enumerate(_iter_wget_records(raw)):
+        n = _graph_num_nodes(graph)
+        if n == 0:
+            continue
+        edge_index = _graph_edge_index(graph)
+        x = _wget_node_features(graph, n, edge_index)
+        x, edge_index = subsample_graph(x, edge_index, args.max_nodes, rng)
+        graphs.append(Graph(x=x, edge_index=edge_index, label=_label_to_int(label), name=f"wget_{idx}"))
+    print(f"Wget loaded: {_split_counts(graphs)}")
+    train, val, test = split_train_val_test(graphs, seed, args.train_ratio, args.val_ratio, args.val_mal_ratio)
+    check_split_overlap("Wget", train, val, test)
+    return train, val, test
+
+
+LOADERS = {"streamspot": load_streamspot, "grasec": load_grasec, "wget": load_wget}
 
 
 def augment(g: Graph, drop_rate: float, mask_rate: float, edge_drop_rate: float,

@@ -3,11 +3,12 @@ from __future__ import annotations
 import csv
 import glob
 import json
+import pickle
 import random
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -143,6 +144,140 @@ def _make_graph(x: np.ndarray, edge_index: np.ndarray, label: int, name: str) ->
     )
 
 
+def _to_numpy(value: Any) -> np.ndarray:
+    if isinstance(value, np.ndarray):
+        return value
+    if torch.is_tensor(value):
+        return value.detach().cpu().numpy()
+    return np.asarray(value)
+
+
+def _label_to_int(value: Any) -> int:
+    arr = _to_numpy(value).reshape(-1)
+    if arr.size == 0:
+        raise ValueError("empty Wget graph label")
+    if arr.size > 1 and np.issubdtype(arr.dtype, np.number):
+        return int(np.argmax(arr))
+    raw = arr[0].item() if hasattr(arr[0], "item") else arr[0]
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in {"benign", "normal", "clean", "0"}:
+            return 0
+        if text in {"malicious", "attack", "anomaly", "1"}:
+            return 1
+    return int(raw)
+
+
+def _looks_like_graph(value: Any) -> bool:
+    return hasattr(value, "edges") and (hasattr(value, "num_nodes") or hasattr(value, "number_of_nodes"))
+
+
+def _graph_num_nodes(graph: Any) -> int:
+    if hasattr(graph, "num_nodes"):
+        return int(graph.num_nodes())
+    return int(graph.number_of_nodes())
+
+
+def _graph_edge_index(graph: Any) -> np.ndarray:
+    src, dst = graph.edges()
+    src_np = _to_numpy(src).astype(np.int64).reshape(-1)
+    dst_np = _to_numpy(dst).astype(np.int64).reshape(-1)
+    if src_np.size == 0:
+        return np.zeros((2, 0), dtype=np.int64)
+    return np.stack([src_np, dst_np]).astype(np.int64)
+
+
+def _one_hot(values: np.ndarray) -> np.ndarray:
+    flat = values.reshape(-1)
+    _, inverse = np.unique(flat, return_inverse=True)
+    out = np.zeros((flat.shape[0], int(inverse.max()) + 1), dtype=np.float32)
+    out[np.arange(flat.shape[0]), inverse] = 1.0
+    return out
+
+
+def _wget_node_features(graph: Any, num_nodes: int, edge_index: np.ndarray) -> np.ndarray:
+    ndata = getattr(graph, "ndata", {})
+    x = None
+    for key in ("node_type", "ntype", "type", "_TYPE", "label", "node_label"):
+        if key in ndata:
+            raw = _to_numpy(ndata[key])
+            if raw.shape[0] == num_nodes:
+                x = raw.astype(np.float32) if raw.ndim == 2 and raw.shape[1] > 1 else _one_hot(raw)
+                break
+    if x is None:
+        for key in ("feat", "features", "x", "attr"):
+            if key in ndata:
+                raw = _to_numpy(ndata[key])
+                if raw.shape[0] == num_nodes and np.issubdtype(raw.dtype, np.number):
+                    x = raw.reshape(num_nodes, -1).astype(np.float32)
+                    break
+    if x is None:
+        x = np.ones((num_nodes, 1), dtype=np.float32)
+    deg = np.log1p(compute_degree(num_nodes, edge_index)).reshape(-1, 1)
+    return np.concatenate([x, deg.astype(np.float32)], axis=1)
+
+
+def _split_wget_record(record: Any) -> tuple[Any, Any]:
+    if isinstance(record, dict):
+        graph = next((record[k] for k in ("graph", "g", "dgl_graph") if k in record), None)
+        label = next((record[k] for k in ("label", "y", "target") if k in record), None)
+        if graph is not None and label is not None:
+            return graph, label
+    if isinstance(record, (tuple, list)):
+        graph = next((item for item in record if _looks_like_graph(item)), None)
+        label = next((item for item in record if item is not graph), None)
+        if graph is not None and label is not None:
+            return graph, label
+    graph = record if _looks_like_graph(record) else getattr(record, "graph", None)
+    label = next((getattr(record, name) for name in ("label", "y", "target") if hasattr(record, name)), None)
+    if graph is not None and label is not None:
+        return graph, label
+    raise ValueError(f"Could not identify graph and label in Wget record of type {type(record).__name__}")
+
+
+def _iter_wget_records(raw: Any) -> Iterable[tuple[Any, Any]]:
+    if isinstance(raw, dict):
+        graphs = next((raw[k] for k in ("graphs", "graph", "data") if k in raw), None)
+        labels = next((raw[k] for k in ("labels", "label", "ys", "y", "targets") if k in raw), None)
+        if graphs is not None and labels is not None and not _looks_like_graph(graphs):
+            for graph, label in zip(graphs, labels):
+                yield graph, label
+            return
+    graphs_attr = next((getattr(raw, name) for name in ("graphs", "graph_lists") if hasattr(raw, name)), None)
+    labels_attr = next((getattr(raw, name) for name in ("labels", "targets") if hasattr(raw, name)), None)
+    if graphs_attr is not None and labels_attr is not None:
+        for graph, label in zip(graphs_attr, labels_attr):
+            yield graph, label
+        return
+    if hasattr(raw, "__len__") and hasattr(raw, "__getitem__") and not _looks_like_graph(raw):
+        for idx in range(len(raw)):
+            yield _split_wget_record(raw[idx])
+        return
+    yield _split_wget_record(raw)
+
+
+def load_wget_graphs(data_root: Path, seed: int, max_nodes: int) -> List[GraphWindow]:
+    pkl = data_root / "wget" / "graphs.pkl"
+    if not pkl.exists():
+        raise FileNotFoundError(
+            f"Missing Wget MAGIC graph dataset: {pkl}. Download MAGIC data/wget/graphs.zip "
+            "and unzip it into data/wget/ so data/wget/graphs.pkl exists."
+        )
+    rng = np.random.default_rng(seed)
+    with pkl.open("rb") as handle:
+        raw = pickle.load(handle)
+    graphs: List[GraphWindow] = []
+    for idx, (graph, label) in enumerate(_iter_wget_records(raw)):
+        num_nodes = _graph_num_nodes(graph)
+        if num_nodes == 0:
+            continue
+        edge_index = _graph_edge_index(graph)
+        x = _wget_node_features(graph, num_nodes, edge_index)
+        x, edge_index = subsample_graph(x, edge_index, max_nodes, rng)
+        graphs.append(_make_graph(x, edge_index, _label_to_int(label), f"wget_{idx}"))
+    return graphs
+
+
 def load_streamspot_graphs(data_root: Path, seed: int, max_nodes: int) -> List[GraphWindow]:
     tsv = data_root / "streamspot" / "all.tsv"
     if not tsv.exists():
@@ -256,8 +391,10 @@ def load_dataset_graphs(dataset: str, data_root: Path, seed: int, max_nodes: int
         graphs = load_streamspot_graphs(data_root, seed=seed, max_nodes=max_nodes)
     elif dataset == "grasec":
         graphs = load_grasec_graphs(data_root, seed=seed, max_nodes=max_nodes)
+    elif dataset == "wget":
+        graphs = load_wget_graphs(data_root, seed=seed, max_nodes=max_nodes)
     else:
-        raise ValueError(f"Unsupported dataset {dataset!r}; expected streamspot or grasec")
+        raise ValueError(f"Unsupported dataset {dataset!r}; expected streamspot, grasec, or wget")
     if not graphs:
         raise RuntimeError(f"No graphs loaded for dataset {dataset}")
     return graphs

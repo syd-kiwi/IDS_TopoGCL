@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-TopIDS — TopoGCL-style graph intrusion detection for StreamSpot and GraSec.
+TopIDS — TopoGCL-style graph intrusion detection for StreamSpot, GraSec, and Wget.
 
 Pipeline:
-  - Real graph edges from StreamSpot/GraSec loaders only.
+    - Real graph edges from StreamSpot/GraSec/Wget loaders only.
   - Train on benign graphs only; validation/test are balanced benign:malicious.
   - Graph channel: GIN encoder with InfoNCE over safe graph augmentations.
   - Topology channel: extended-persistence-landscape (EPL) vectors encoded by ETL.
@@ -19,6 +19,7 @@ import argparse
 import csv
 import glob
 import json
+import pickle
 import random
 from dataclasses import dataclass, field
 from functools import partial
@@ -42,6 +43,14 @@ from sklearn.neighbors import NearestNeighbors
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from ids_graph_data import (
+    _graph_edge_index,
+    _graph_num_nodes,
+    _iter_wget_records,
+    _label_to_int,
+    _wget_node_features,
+)
 
 print = partial(print, flush=True)
 
@@ -74,8 +83,8 @@ def parse_csv_list(text: str) -> list[str]:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="StreamSpot/GraSec TopoGCL IDS experiment")
-    p.add_argument("--dataset", choices=["streamspot", "grasec", "all"], default="all")
+    p = argparse.ArgumentParser(description="StreamSpot/GraSec/Wget TopoGCL IDS experiment")
+    p.add_argument("--dataset", choices=["streamspot", "grasec", "wget", "all"], default="all")
     p.add_argument("--seed", type=int, default=42, help="Single seed; ignored when --seeds is supplied")
     p.add_argument("--seeds", default="", help="Comma-separated seeds, e.g. 42,43,44,45,46")
     p.add_argument("--mode", choices=["graph_only", "topo_only", "graph_topo"], default="graph_topo")
@@ -428,6 +437,32 @@ def load_grasec(args):
     print(f"GraSec fallback loaded: {_split_counts(graphs)}")
     train, val, test = split_train_val_test(graphs, args.seed, args.train_ratio, args.val_ratio, args.val_mal_ratio)
     check_split_overlap("GraSec fallback", train, val, test)
+    return train, val, test
+
+
+def load_wget(args):
+    print("Step 1/4: Loading Wget MAGIC DGL graphs...")
+    pkl = DATA / "wget" / "graphs.pkl"
+    if not pkl.exists():
+        raise FileNotFoundError(
+            f"Missing Wget MAGIC graph dataset: {pkl}. Download MAGIC data/wget/graphs.zip "
+            "and unzip it into data/wget/ so data/wget/graphs.pkl exists."
+        )
+    rng = np.random.default_rng(args.seed)
+    with pkl.open("rb") as handle:
+        raw = pickle.load(handle)
+    graphs: list[Graph] = []
+    for idx, (graph, label) in enumerate(_iter_wget_records(raw)):
+        n = _graph_num_nodes(graph)
+        if n == 0:
+            continue
+        edge_index = _graph_edge_index(graph)
+        x = _wget_node_features(graph, n, edge_index)
+        x, edge_index = subsample_graph(x, edge_index, args.max_nodes, rng)
+        graphs.append(Graph(x=x, edge_index=edge_index, label=_label_to_int(label), name=f"wget_{idx}"))
+    print(f"Wget loaded: {_split_counts(graphs)}")
+    train, val, test = split_train_val_test(graphs, args.seed, args.train_ratio, args.val_ratio, args.val_mal_ratio)
+    check_split_overlap("Wget", train, val, test)
     return train, val, test
 
 
@@ -812,7 +847,7 @@ def print_result(name: str, r: dict) -> None:
     print(f"  Confusion: TN={r['tn']} FP={r['fp']} FN={r['fn']} TP={r['tp']}")
 
 
-LOADERS = {"streamspot": load_streamspot, "grasec": load_grasec}
+LOADERS = {"streamspot": load_streamspot, "grasec": load_grasec, "wget": load_wget}
 
 
 def config_row(dataset: str, args, result: dict) -> dict:
@@ -905,7 +940,7 @@ def save_outputs(args, metric_rows: list[dict], score_rows: list[dict]) -> None:
 
 def main():
     args = parse_args()
-    print("TopIDS TopoGCL StreamSpot/GraSec experiment started.")
+    print("TopIDS TopoGCL StreamSpot/GraSec/Wget experiment started.")
     names = list(LOADERS) if args.dataset == "all" else [args.dataset]
     metric_rows: list[dict] = []
     all_score_rows: list[dict] = []

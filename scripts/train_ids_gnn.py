@@ -29,7 +29,7 @@ from ids_graph_data import (
 )
 
 DEFAULT_DATA_ROOT = Path(__file__).resolve().parents[1] / "data"
-DATASET_CHOICES = ("streamspot", "grasec", "all")
+DATASET_CHOICES = ("streamspot", "grasec", "wget", "all")
 
 
 @dataclass(frozen=True)
@@ -149,7 +149,7 @@ def run_supervised_model(
 
 
 def dataset_names(selection: str) -> Tuple[str, ...]:
-    return ("streamspot", "grasec") if selection == "all" else (selection,)
+    return ("streamspot", "grasec", "wget") if selection == "all" else (selection,)
 
 
 def run_dataset(dataset: str, config: SupervisedConfig, device: torch.device) -> tuple[Dict[str, object], List[Dict[str, object]], List[Dict[str, object]]]:
