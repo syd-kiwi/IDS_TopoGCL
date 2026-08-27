@@ -1,0 +1,95 @@
+\documentclass[conference]{IEEEtran}
+
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage[noend]{algorithmic}
+\usepackage{xspace}
+\usepackage{tabularx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage[most]{tcolorbox}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{xspace}
+\usepackage{amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\setlength{\columnsep}{0.25in}
+\setlength{\parskip}{0pt}
+
+\usepackage[letterpaper,top=0.75in,bottom=1.0in,left=0.68in,right=0.68in]{geometry}
+\addtolength{\textheight}{-0.07in}
+
+\usepackage[
+    letterpaper,
+    left=0.62in,
+    right=0.62in,
+    top=0.65in,
+    bottom=0.95in
+]{geometry}
+
+\usepackage{xcolor}
+\definecolor{burgundy}{rgb}{0.76, 0.13, 0.28}
+\definecolor{darkgreen}{rgb}{0.0, 0.5, 0.0}
+\newcommand{\hsnote}[1]{\textcolor{burgundy}{[HS: #1]}}
+\newcommand{\add}[1]{\textcolor{darkgreen}{#1}}
+
+\setlength{\columnsep}{0.25in}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\setlength{\parindent}{1em}
+
+\newcommand{\sysname}{TopoIDS\xspace}
+
+\begin{document}
+
+\title{\sysname: Topological Graph Contrastive Learning for Intrusion Detection in IoT Networks}
+
+\begin{comment}
+\author{\IEEEauthorblockN{
+Sydney Johns, 
+Chaoyu Zhang,
+Hasan Shahriar,
+Yulia Gel,
+Y. Thomas Hou,
+Wenjing Lou}
+\IEEEauthorblockA{{Virginia Polytechnic Institute and State University, Virginia, United States} \\
+Email: sydneyjohns@vt.edu, chaoyu@vt.edu, hshahriar@vt.edu, ygl@vt.edu, thou@vt.edu, wjlou@vt.edu}
+}
+\end{comment}
+
+
+\maketitle
+
+\begin{abstract}
+We propose \sysname, a topology-aware graph contrastive learning framework for label-efficient intrusion detection. \sysname learns representations from normal system-activity graphs using unsupervised contrastive learning and incorporates topological structural information to capture graph patterns. Unlike generic graph contrastive learning methods that are designed primarily for representation learning or graph classification, \sysname is designed for intrusion detection through anomaly scoring. It computes detection scores in the same projected contrastive embedding space optimized during training, reducing the mismatch between representation learning and anomaly detection. During inference, each test graph is scored by its distance from the learned distribution of graph embeddings, with larger distances indicating higher anomaly likelihood.
+
+We evaluate \sysname on StreamSpot, GraSec-IoT, and Unicorn against a supervised graph neural network and GraphCL, a unsupervised graph contrastive learning baseline. The supervised model performs strongly when labeled attack examples are available, but \sysname achieves the best performance among unsupervised detection methods. Compared with GraphCL, \sysname improves F1 score from 0.923 to 0.926 on StreamSpot, from 0.790 to 0.985 on GraSec-IoT, and from 0.583 to 0.863 on Unicorn Wget. These results show that combining topological structure with contrastive graph representation learning can improve intrusion detection under limited attack-label availability.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Intrusion detection, anomaly detection, graph anomaly detection, graph neural networks, graph contrastive learning, topology-aware learning, GNN
+\end{IEEEkeywords}
+
+
+\input{1_Introduction.tex}
+\input{2_RelatedWork}
+\input{3_Methodology.tex}
+\input{4_Evaluation.tex}
+\input{5_Discussion.tex}
+\input{6_Conclusion.tex}
+\input{7_ACKNOWLEDGMENT}
+
+\bibliographystyle{ieeetr}
+\bibliography{IEEEabrv,ref}
+
+\begin{comment}
+    \hsnote{It is not clear yet why we need unsupervised?}
+    \hsnote{for who? ML-based, rule-based, statistical, or in general?}
+\end{comment}
+
+\end{document}
+

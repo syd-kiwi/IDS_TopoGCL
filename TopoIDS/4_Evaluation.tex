@@ -1,0 +1,90 @@
+\section{Evaluation}\label{sec:evaluation}
+
+\begin{table*}[t]
+\centering
+\caption{Intrusion detection performance across three graph-based security datasets. The supervised GNN uses labeled attacks during training. GraphCL and \sysname{} are benign-only representation learning methods.}
+\label{tab:main_results}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+Dataset & Model & Accuracy & Precision & Recall & F1 \\
+\midrule
+StreamSpot & Supervised GNN & $0.989 \pm 0.016$ & $0.999 \pm 0.001$ & $0.933 \pm 0.094$ & $0.963 \pm 0.052$ \\
+StreamSpot & GraphCL & $0.917 \pm 0.023$ & $0.862 \pm 0.037$ & $0.996 \pm 0.006$ & $0.923 \pm 0.019$ \\
+StreamSpot & \sysname{} & $0.978 \pm 0.016$ & $0.999 \pm 0.001$ & $0.867 \pm 0.094$ & $0.926 \pm 0.052$ \\
+\midrule
+GraSec-IoT & Supervised GNN & $0.988 \pm 0.003$ & $0.997 \pm 0.002$ & $0.990 \pm 0.004$ & $0.994 \pm 0.002$ \\
+GraSec-IoT & GraphCL & $0.742 \pm 0.124$ & $0.718 \pm 0.129$ & $0.909 \pm 0.064$ & $0.790 \pm 0.065$ \\
+GraSec-IoT & \sysname{} & $0.971 \pm 0.002$ & $0.982 \pm 0.002$ & $0.988 \pm 0.004$ & $0.985 \pm 0.001$ \\
+\midrule
+Unicorn Wget & Supervised GNN & $0.867 \pm 0.060$ & $0.600 \pm 0.490$ & $0.267 \pm 0.226$ & $0.367 \pm 0.306$ \\
+Unicorn Wget & GraphCL & $0.515 \pm 0.062$ & $0.537 \pm 0.071$ & $0.710 \pm 0.215$ & $0.583 \pm 0.053$ \\
+Unicorn Wget & \sysname{} & $0.895 \pm 0.012$ & $0.882 \pm 0.015$ & $0.845 \pm 0.022$ & $0.863 \pm 0.014$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+This section evaluates whether \sysname{} improves graph-based intrusion detection. The method section described how \sysname{} learns from benign graphs and scores test graphs by distance from benign training embeddings. The evaluation tests whether this design works across datasets, baselines, and training settings.
+
+\subsection{Research Questions}
+
+We evaluate three research questions:
+
+\begin{itemize}
+    \item RQ1: How does \sysname{} compare with supervised and benign-only graph baselines across intrusion detection datasets?
+
+    \item RQ2: Does topology-aware contrastive scoring improve over standard graph contrastive learning?
+
+    \item RQ3: How do the methods balance attack recall and alert precision?
+\end{itemize}
+
+\subsection{Datasets}
+
+We evaluate graph-level intrusion detection on three datasets. Each dataset is converted into a set of graphs. Each graph has a benign or malicious label for validation and testing. During representation learning, benign-only methods use only benign training graphs.
+
+\begin{itemize}
+    \item \textbf{StreamSpot:} contains heterogeneous system-activity provenance graphs. These graphs represent relationships among system entities and events. StreamSpot is useful for testing whether a detector can identify malicious behavior in structured system activity \cite{manzoor2016streamspot}.
+
+    \item \textbf{GraSec-IoT:} contains graph snapshots from an Internet of Things security setting. It includes communication behavior and attack activity in an IoT environment \cite{hamouche2024graseciot}. This dataset tests whether the method works on IoT-style communication graphs.
+
+    \item \textbf{Unicorn Wget:} is a graph-based security dataset built from system activity collected from a Wget attack scenario. It provides graph samples rather than tabular flow records, so it fits our graph-level detection setting \cite{unicornwget}.
+\end{itemize}
+
+For all datasets, we use the same split logic. Benign-only methods train their encoders using only benign training graphs. The validation set contains benign and malicious graphs and is used only to choose the anomaly threshold. The test set is used once for final evaluation. We use the same splits and random seeds for all methods.
+
+\subsection{Baselines}
+
+We compare \sysname{} with one label-rich reference model and one benign-only representation learning baseline.
+
+\begin{itemize}
+    \item \textbf{Supervised GNN.} This supervised graph neural network is trained with labeled benign and malicious graphs. We treat it as a label-rich reference baseline. It is not directly comparable to benign-only representation learning methods because it uses attack labels during training, but it shows what performance is possible when labels are available.
+
+    \item \textbf{GraphCL.} This benign-only graph contrastive learning baseline learns graph embeddings from augmented graph views without using attack labels during representation learning \cite{you2020graphcl}. It tests whether standard graph contrastive learning is sufficient for this task.
+\end{itemize}
+
+\subsection{Experimental Setup}
+
+All methods use the same train, validation, and test splits for each seed. We report the mean and standard deviation across five random seeds: 42, 43, 44, 45, and 46. For each seed, the threshold is selected on the validation set and then applied once to the test set.
+
+The encoder is trained only on benign training graphs. Malicious graphs are used only for validation threshold selection and final testing. This prevents attack labels from being used during representation learning.
+
+Unless stated otherwise, we use the following hyperparameters: 12 training epochs, hidden dimension 64, embedding dimension 64, temperature 0.2, maximum 512 nodes per graph, node drop rate 0.10, edge drop rate 0.05, feature mask rate 0.10, topology mask rate 0.10, topology noise 0.10, and $k=5$ nearest neighbors for anomaly scoring. For the joint graph-topology model, we use $\alpha=0.5$ and $\beta=0.5$ to weight the graph and topology contrastive losses.
+
+\subsection{Metrics}
+
+We report accuracy, precision, recall, and F1 score. Let TP be true positives, TN be true negatives, FP be false positives, and FN be false negatives. Precision is $\frac{TP}{TP+FP}$ and measures how many predicted attacks are actually attacks. Recall is $\frac{TP}{TP+FN}$ and measures how many attacks are detected. F1 score is the harmonic mean of precision and recall.
+
+F1 is useful because intrusion detection needs both high precision and high recall. Precision is important because too many false alerts can make an intrusion detection system difficult to use in practice. Recall is important because missed attacks can leave a system exposed.
+
+\subsection{Results}
+
+Table~\ref{tab:main_results} reports intrusion detection performance across StreamSpot, GraSec-IoT, and Unicorn Wget. The supervised GNN uses labeled benign and malicious graphs during training. GraphCL and \sysname{} train their encoders using only benign graphs and use labeled validation data only for threshold selection.
+
+On StreamSpot, the supervised GNN achieves the highest F1 score, with $0.963 \pm 0.052$. \sysname{} slightly improves over GraphCL, increasing F1 from $0.923 \pm 0.019$ to $0.926 \pm 0.052$. GraphCL has higher recall, while \sysname{} has higher precision and accuracy. This means GraphCL detects more malicious graphs, while \sysname{} is more conservative and produces fewer incorrect malicious predictions.
+
+On GraSec-IoT, \sysname{} gives a much larger improvement over GraphCL. GraphCL reaches $0.790 \pm 0.065$ F1, while \sysname{} reaches $0.985 \pm 0.001$ F1. \sysname{} also performs close to the supervised GNN on this dataset, even though it does not use labeled attacks during representation learning. This result suggests that topology-aware contrastive embeddings are useful when benign and malicious graphs differ in structural patterns captured by the topology-aware representation.
+
+On Unicorn Wget, \sysname{} achieves the strongest result among all evaluated methods. It reaches $0.863 \pm 0.014$ F1, compared with $0.583 \pm 0.053$ for GraphCL and $0.367 \pm 0.306$ for the supervised GNN. \sysname{} also improves both precision and recall over GraphCL. This result is important because the supervised GNN has high accuracy but low recall on Unicorn Wget, which means it misses many malicious graphs. In contrast, \sysname{} gives a better balance between detecting attacks and avoiding false alerts.
+
+Across the three datasets, \sysname{} improves over GraphCL by $0.003$ F1 on StreamSpot, $0.195$ F1 on GraSec-IoT, and $0.280$ F1 on Unicorn Wget. These results show that topology-aware contrastive learning can improve benign-only graph intrusion detection, especially on datasets where structural differences between benign and malicious graphs are important.
