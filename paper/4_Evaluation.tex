@@ -65,7 +65,7 @@ We compare \sysname{} with one label-rich reference model and one benign-only re
 
 \subsection{Experimental Setup}
 
-All methods use the same train, validation, and test splits for each seed. We report the mean and standard deviation across five random seeds: 42, 43, 44, 45, and 46. For each seed, the threshold is selected on the validation set and then applied once to the test set.
+All methods use the same train, validation, and test splits for each seed. The reported summaries aggregate repeated runs, and the threshold is selected separately on the validation set for each run before being applied once to the corresponding test set.
 
 The encoder is trained only on benign training graphs. Malicious graphs are used only for validation threshold selection and final testing. This prevents attack labels from being used during representation learning.
 
@@ -77,14 +77,17 @@ We report accuracy, precision, recall, and F1 score. Let TP be true positives, T
 
 F1 is useful because intrusion detection needs both high precision and high recall. Precision is important because too many false alerts can make an intrusion detection system difficult to use in practice. Recall is important because missed attacks can leave a system exposed.
 
-\subsection{Results}
+\subsection{Results by Research Question}
 
 Table~\ref{tab:main_results} reports intrusion detection performance across StreamSpot, GraSec-IoT, and Unicorn Wget. The supervised GNN uses labeled benign and malicious graphs during training. GraphCL and \sysname{} train their encoders using only benign graphs and use labeled validation data only for threshold selection.
 
-On StreamSpot, the supervised GNN achieves the highest F1 score, with $0.963 \pm 0.052$. \sysname{} slightly improves over GraphCL, increasing F1 from $0.923 \pm 0.019$ to $0.926 \pm 0.052$. GraphCL has higher recall, while \sysname{} has higher precision and accuracy. This means GraphCL detects more malicious graphs, while \sysname{} is more conservative and produces fewer incorrect malicious predictions.
+\noindent\textbf{RQ1: Comparison with supervised and benign-only baselines.}
+The answer differs by dataset. On StreamSpot, the supervised GNN has the highest F1 ($0.963 \pm 0.052$), while \sysname{} and GraphCL are close. On GraSec-IoT, the supervised GNN again leads, but \sysname{} approaches it with F1 of $0.985 \pm 0.001$ versus $0.994 \pm 0.002$. On Unicorn Wget, \sysname{} obtains the highest F1 ($0.863 \pm 0.014$), whereas the supervised GNN has high accuracy but low recall. Thus, \sysname{} is not uniformly superior to label-rich learning; it is most competitive when attack labels are limited or do not yield a reliable recall--precision balance.
 
-On GraSec-IoT, \sysname{} gives a much larger improvement over GraphCL. GraphCL reaches $0.790 \pm 0.065$ F1, while \sysname{} reaches $0.985 \pm 0.001$ F1. \sysname{} also performs close to the supervised GNN on this dataset, even though it does not use labeled attacks during representation learning. This result suggests that topology-aware contrastive embeddings are useful when benign and malicious graphs differ in structural patterns captured by the topology-aware representation.
+\noindent\textbf{RQ2: Effect of topology-aware contrastive scoring.}
+Relative to GraphCL, the F1 difference is only $0.003$ on StreamSpot ($0.923$ versus $0.926$). Given the reported variation, this small numerical difference should not be interpreted as evidence of a meaningful advantage on that dataset. The differences are larger on GraSec-IoT ($0.790$ versus $0.985$) and Unicorn Wget ($0.583$ versus $0.863$). One plausible interpretation is that degree- and closeness-based topological summaries add more useful information when attacks alter connectivity at graph scale. By contrast, StreamSpot may already be well represented by the local and pooled features learned by the graph encoder. Because the study does not isolate individual attack structures, this explanation remains a hypothesis rather than a demonstrated causal mechanism.
 
-On Unicorn Wget, \sysname{} achieves the strongest result among all evaluated methods. It reaches $0.863 \pm 0.014$ F1, compared with $0.583 \pm 0.053$ for GraphCL and $0.367 \pm 0.306$ for the supervised GNN. \sysname{} also improves both precision and recall over GraphCL. This result is important because the supervised GNN has high accuracy but low recall on Unicorn Wget, which means it misses many malicious graphs. In contrast, \sysname{} gives a better balance between detecting attacks and avoiding false alerts.
+\noindent\textbf{RQ3: Precision--recall balance.}
+StreamSpot exposes a trade-off: GraphCL has higher recall ($0.996 \pm 0.006$), whereas \sysname{} has higher precision ($0.999 \pm 0.001$) but lower recall ($0.867 \pm 0.094$). The nearly equal F1 scores therefore arise from different operating characteristics rather than a clear overall win. On GraSec-IoT, \sysname{} combines precision of $0.982 \pm 0.002$ with recall of $0.988 \pm 0.004$, approaching the supervised reference on both measures. On Unicorn Wget, it improves both precision and recall over GraphCL and avoids the supervised GNN's low recall ($0.267 \pm 0.226$). For resilient monitoring, the preferred balance remains deployment-dependent: missed attacks favor recall, whereas analyst capacity and alert fatigue favor precision.
 
-Across the three datasets, \sysname{} improves over GraphCL by $0.003$ F1 on StreamSpot, $0.195$ F1 on GraSec-IoT, and $0.280$ F1 on Unicorn Wget. These results show that topology-aware contrastive learning can improve benign-only graph intrusion detection, especially on datasets where structural differences between benign and malicious graphs are important.
+Overall, RQ1 shows that supervision is advantageous on StreamSpot and GraSec-IoT but not on Unicorn Wget; RQ2 shows no practically clear topology-aware benefit on StreamSpot and larger differences on the other two datasets; and RQ3 shows that \sysname{} provides the most balanced precision and recall on GraSec-IoT and Unicorn Wget, while GraphCL prioritizes recall on StreamSpot.

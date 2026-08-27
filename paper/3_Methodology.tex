@@ -43,7 +43,7 @@ where $\operatorname{norm}(\cdot)$ denotes $\ell_2$ normalization and $\Vert$ de
 
 During training, \sysname{} creates two augmented views of each graph. These views preserve the main identity of the graph while changing small details. For the graph channel, we use graph augmentations such as node dropping, edge dropping, and feature masking. For the topology channel, we perturb the topology feature vector with masking and noise.
 
-For a batch of $N$ graphs, let $A=\{a_1,\ldots,a_N\}$ be the embeddings from one augmented view and $B=\{b_1,\ldots,b_N\}$ be the embeddings from the other augmented view. The contrastive loss treats $(a_i,b_i)$ as a positive pair because both embeddings come from the same original graph. It treats $(a_i,b_j)$ for $i\neq j$ as negative pairs because the embeddings come from different graphs. The one-direction InfoNCE loss is:
+InfoNCE trains the representation by posing a matching problem within each batch. For every embedding from the first augmented view, the corresponding embedding of the same original graph in the second view is the positive match; embeddings of the other graphs are alternatives. The loss increases the positive pair's similarity relative to all alternatives, with the temperature controlling how strongly it emphasizes the closest matches. Thus, the objective preserves graph identity under small augmentations while separating different benign activity patterns. Formally, for a batch of $N$ graphs, let $A=\{a_1,\ldots,a_N\}$ and $B=\{b_1,\ldots,b_N\}$ denote the embeddings of the two views. The one-direction InfoNCE loss is:
 \begin{equation}
     \mathcal{L}_{\text{NCE}}(A,B)
     =
