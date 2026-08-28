@@ -20,7 +20,7 @@ In summary, this paper makes the following contributions:
 \begin{itemize}
     \item We formulate graph intrusion detection as benign-only representation learning and anomaly scoring under limited attack-label availability.
     \item We introduce \sysname, which combines message-passing and topological embeddings and performs detection in the contrastive space optimized during training.
-    \item We evaluate \sysname on three graph security datasets against supervised and benign-only baselines, finding a marginal StreamSpot difference and larger F1 gains over GraphCL on GraSec-IoT and Unicorn Wget.
+    \item We evaluate \sysname on three graph security datasets against supervised and benign-only baselines, finding higher F1 than GraphCL on StreamSpot and Unicorn Wget but lower F1 on GraSec-IoT.
 \end{itemize}
 
 Together, these contributions examine how topology-aware, benign-only anomaly detection can support resilient ML-driven security monitoring when labeled attacks are incomplete or may not represent deployment behavior.
