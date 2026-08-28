@@ -9,23 +9,23 @@
 \toprule
 Dataset & Model & Accuracy & Precision & Recall & F1 \\
 \midrule
-StreamSpot & Supervised GNN & $0.989 \pm 0.016$ & $0.999 \pm 0.001$ & $0.933 \pm 0.094$ & $0.963 \pm 0.052$ \\
-StreamSpot & GraphCL & $0.917 \pm 0.023$ & $0.862 \pm 0.037$ & $0.996 \pm 0.006$ & $0.923 \pm 0.019$ \\
-StreamSpot & \sysname{} & $0.978 \pm 0.016$ & $0.999 \pm 0.001$ & $0.867 \pm 0.094$ & $0.926 \pm 0.052$ \\
+StreamSpot & Supervised GNN & $0.989 \pm 0.016$ & $1.000 \pm 0.000$ & $0.933 \pm 0.094$ & $0.963 \pm 0.052$ \\
+StreamSpot & GraphCL & $0.750 \pm 0.036$ & $0.353 \pm 0.054$ & $0.733 \pm 0.377$ & $0.450 \pm 0.154$ \\
+StreamSpot & \sysname{} & $0.917 \pm 0.023$ & $0.862 \pm 0.037$ & $0.996 \pm 0.006$ & $0.923 \pm 0.019$ \\
 \midrule
 GraSec-IoT & Supervised GNN & $0.988 \pm 0.003$ & $0.997 \pm 0.002$ & $0.990 \pm 0.004$ & $0.994 \pm 0.002$ \\
-GraSec-IoT & GraphCL & $0.742 \pm 0.124$ & $0.718 \pm 0.129$ & $0.909 \pm 0.064$ & $0.790 \pm 0.065$ \\
-GraSec-IoT & \sysname{} & $0.971 \pm 0.002$ & $0.982 \pm 0.002$ & $0.988 \pm 0.004$ & $0.985 \pm 0.001$ \\
+GraSec-IoT & GraphCL & $0.953 \pm 0.006$ & $0.970 \pm 0.006$ & $0.980 \pm 0.008$ & $0.975 \pm 0.003$ \\
+GraSec-IoT & \sysname{} & $0.742 \pm 0.124$ & $0.718 \pm 0.129$ & $0.909 \pm 0.064$ & $0.790 \pm 0.065$ \\
 \midrule
 Unicorn Wget & Supervised GNN & $0.867 \pm 0.060$ & $0.600 \pm 0.490$ & $0.267 \pm 0.226$ & $0.367 \pm 0.306$ \\
-Unicorn Wget & GraphCL & $0.515 \pm 0.062$ & $0.537 \pm 0.071$ & $0.710 \pm 0.215$ & $0.583 \pm 0.053$ \\
-Unicorn Wget & \sysname{} & $0.895 \pm 0.012$ & $0.882 \pm 0.015$ & $0.845 \pm 0.022$ & $0.863 \pm 0.014$ \\
+Unicorn Wget & GraphCL & $0.560 \pm 0.200$ & $0.123 \pm 0.101$ & $0.600 \pm 0.490$ & $0.203 \pm 0.167$ \\
+Unicorn Wget & \sysname{} & $0.515 \pm 0.062$ & $0.537 \pm 0.071$ & $0.710 \pm 0.215$ & $0.583 \pm 0.053$ \\
 \bottomrule
 \end{tabular}%
 }
 \end{table*}
 
-This section evaluates whether \sysname{} improves graph-based intrusion detection. The method section described how \sysname{} learns from benign graphs and scores test graphs by distance from benign training embeddings. The evaluation tests whether this design works across datasets, baselines, and training settings.
+This section evaluates whether \sysname{} provides effective graph-level intrusion detection across datasets, baselines, and label-availability settings.
 
 \subsection{Research Questions}
 
@@ -65,11 +65,11 @@ We compare \sysname{} with one label-rich reference model and one benign-only re
 
 \subsection{Experimental Setup}
 
-All methods use the same train, validation, and test splits for each seed. The reported summaries aggregate repeated runs, and the threshold is selected separately on the validation set for each run before being applied once to the corresponding test set.
+All methods use the same split logic for a given dataset and seed. StreamSpot and GraSec-IoT results aggregate seeds 42, 43, and 44; Unicorn Wget results aggregate seeds 42 through 46. The threshold is selected separately on the validation set for each benign-only run before being applied once to the corresponding test set.
 
 The encoder is trained only on benign training graphs. Malicious graphs are used only for validation threshold selection and final testing. This prevents attack labels from being used during representation learning.
 
-Unless stated otherwise, we use the following hyperparameters: 12 training epochs, hidden dimension 64, embedding dimension 64, temperature 0.2, maximum 512 nodes per graph, node drop rate 0.10, edge drop rate 0.05, feature mask rate 0.10, topology mask rate 0.10, topology noise 0.10, and $k=5$ nearest neighbors for anomaly scoring. For the joint graph-topology model, we use $\alpha=0.5$ and $\beta=0.5$ to weight the graph and topology contrastive losses.
+For \sysname{}, we use 12 training epochs, hidden dimension 64, embedding dimension 64, temperature 0.2, maximum 512 nodes per graph, node drop rate 0.10, edge drop rate 0.05, feature mask rate 0.10, topology mask rate 0.10, topology noise 0.10, and $k=5$ nearest neighbors for anomaly scoring. For the joint graph-topology model, we use $\alpha=0.5$ and $\beta=0.5$ to weight the graph and topology contrastive losses. Baseline hyperparameters follow their saved experimental configurations rather than being assumed identical to \sysname{}.
 
 \subsection{Metrics}
 
@@ -82,12 +82,12 @@ F1 is useful because intrusion detection needs both high precision and high reca
 Table~\ref{tab:main_results} reports intrusion detection performance across StreamSpot, GraSec-IoT, and Unicorn Wget. The supervised GNN uses labeled benign and malicious graphs during training. GraphCL and \sysname{} train their encoders using only benign graphs and use labeled validation data only for threshold selection.
 
 \noindent\textbf{RQ1: Comparison with supervised and benign-only baselines.}
-The answer differs by dataset. On StreamSpot, the supervised GNN has the highest F1 ($0.963 \pm 0.052$), while \sysname{} and GraphCL are close. On GraSec-IoT, the supervised GNN again leads, but \sysname{} approaches it with F1 of $0.985 \pm 0.001$ versus $0.994 \pm 0.002$. On Unicorn Wget, \sysname{} obtains the highest F1 ($0.863 \pm 0.014$), whereas the supervised GNN has high accuracy but low recall. Thus, \sysname{} is not uniformly superior to label-rich learning; it is most competitive when attack labels are limited or do not yield a reliable recall--precision balance.
+The supervised GNN achieves the highest F1 on StreamSpot ($0.963 \pm 0.052$) and GraSec-IoT ($0.994 \pm 0.002$), while \sysname{} achieves the highest F1 on Unicorn Wget ($0.583 \pm 0.053$ versus $0.367 \pm 0.306$ for the supervised GNN). Among the benign-only methods, \sysname{} has higher F1 on StreamSpot ($0.923 \pm 0.019$ versus $0.450 \pm 0.154$) and Unicorn Wget ($0.583 \pm 0.053$ versus $0.203 \pm 0.167$), whereas GraphCL leads on GraSec-IoT ($0.975 \pm 0.003$ versus $0.790 \pm 0.065$). Thus, \sysname{} is competitive in two benign-only comparisons but is neither uniformly superior to GraphCL nor a replacement for label-rich learning when representative attack labels are available.
 
 \noindent\textbf{RQ2: Effect of topology-aware contrastive scoring.}
-Relative to GraphCL, the F1 difference is only $0.003$ on StreamSpot ($0.923$ versus $0.926$). Given the reported variation, this small numerical difference should not be interpreted as evidence of a meaningful advantage on that dataset. The differences are larger on GraSec-IoT ($0.790$ versus $0.985$) and Unicorn Wget ($0.583$ versus $0.863$). One plausible interpretation is that degree- and closeness-based topological summaries add more useful information when attacks alter connectivity at graph scale. By contrast, StreamSpot may already be well represented by the local and pooled features learned by the graph encoder. Because the study does not isolate individual attack structures, this explanation remains a hypothesis rather than a demonstrated causal mechanism.
+Topology-aware contrastive scoring does not improve over standard GraphCL uniformly. \sysname{} has higher F1 by $0.473$ on StreamSpot and $0.380$ on Unicorn Wget, but lower F1 by $0.185$ on GraSec-IoT. This heterogeneity indicates that the value of degree- and closeness-based topological summaries depends on the dataset and graph construction. A plausible explanation is that topology adds complementary information when anomalous behavior changes connectivity at graph scale, while the standard graph representation is already sufficient for the GraSec-IoT split. Because the methods also differ in architecture and training configuration, these comparisons do not isolate topology as the sole causal factor.
 
 \noindent\textbf{RQ3: Precision--recall balance.}
-StreamSpot exposes a trade-off: GraphCL has higher recall ($0.996 \pm 0.006$), whereas \sysname{} has higher precision ($0.999 \pm 0.001$) but lower recall ($0.867 \pm 0.094$). The nearly equal F1 scores therefore arise from different operating characteristics rather than a clear overall win. On GraSec-IoT, \sysname{} combines precision of $0.982 \pm 0.002$ with recall of $0.988 \pm 0.004$, approaching the supervised reference on both measures. On Unicorn Wget, it improves both precision and recall over GraphCL and avoids the supervised GNN's low recall ($0.267 \pm 0.226$). For resilient monitoring, the preferred balance remains deployment-dependent: missed attacks favor recall, whereas analyst capacity and alert fatigue favor precision.
+On StreamSpot, \sysname{} combines recall of $0.996 \pm 0.006$ with precision of $0.862 \pm 0.037$, whereas GraphCL has lower and much more variable recall ($0.733 \pm 0.377$) and precision ($0.353 \pm 0.054$). On GraSec-IoT, GraphCL provides the stronger balance, with precision of $0.970 \pm 0.006$ and recall of $0.980 \pm 0.008$; \sysname{} retains high recall ($0.909 \pm 0.064$) but lower precision ($0.718 \pm 0.129$). On Unicorn Wget, \sysname{} improves the benign-only balance, but both benign-only methods and the supervised GNN exhibit substantial weaknesses or variability. For resilient monitoring, the preferred operating point remains deployment-dependent: missed attacks favor recall, whereas analyst capacity and alert fatigue favor precision.
 
-Overall, RQ1 shows that supervision is advantageous on StreamSpot and GraSec-IoT but not on Unicorn Wget; RQ2 shows no practically clear topology-aware benefit on StreamSpot and larger differences on the other two datasets; and RQ3 shows that \sysname{} provides the most balanced precision and recall on GraSec-IoT and Unicorn Wget, while GraphCL prioritizes recall on StreamSpot.
+Overall, RQ1 shows that the supervised reference has the highest F1 on StreamSpot and GraSec-IoT, while \sysname{} leads on Unicorn Wget and is the stronger benign-only method on StreamSpot and Unicorn Wget. RQ2 shows that topology-aware scoring is dataset-dependent rather than uniformly beneficial. RQ3 shows a strong TRACE recall--precision balance on StreamSpot, a stronger GraphCL balance on GraSec-IoT, and challenging, variable behavior for all methods on Unicorn Wget.
