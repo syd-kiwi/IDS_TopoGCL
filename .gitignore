@@ -1,7 +1,34 @@
-.venv
-data
-InfoGraph
-RGCL
-results_old
-scripts_old
+# Local environments and datasets
+.venv/
+venv/
+data/
+InfoGraph/
+RGCL/
+results_old/
+scripts_old/
 
+# New experiments and job logs
+outputs/
+logs/
+
+# Generated files
+__pycache__/
+*.py[cod]
+.DS_Store
+.pytest_cache/
+*.egg-info/
+
+# LaTeX build files
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+
+# Local credentials
+.env
+.env.*
+!.env.example
