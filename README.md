@@ -1,62 +1,62 @@
-# TopIDS
+# TRACE
 
-End-to-end graph intrusion detection prototype based on **TopoGCL** (Topological Graph Contrastive Learning, AAAI 2024). A single Python script trains on benign provenance graphs and scores test graphs as benign or malicious.
+**Topology-Aware Graph Contrastive Learning for Resilient Intrusion Detection**
 
-## Repository
+Accepted at **ARTMAN 2026**, co-located with IEEE ACSAC. The workshop takes place on **December 8, 2026, in Los Angeles, California**.
 
-```
-topIDS/
-├── data/
-│   ├── streamspot/     # StreamSpot provenance graphs (all.tsv)
-│   └── grasec-iot/     # GraSec-IoT flow-graph snapshots (JSON)
-└── topids_topogcl_prototype.py
-```
+[Workshop and program](https://artman-workshop.gitlab.io/) · [Paper source](paper/main.tex) · [Run guide](docs/RUNNING.md) · [Saved results](results/README.md)
 
-## Pipeline
+## What TRACE does
 
-1. **Load data** — Parse real graph edges and node features (no kNN re-wiring). Large graphs are capped at 512 nodes.
-2. **Train TopoGCL** (benign only) — Two channels trained with symmetric InfoNCE and in-batch negatives:
-   - **Graph channel (H):** 2-layer GIN encoder; readout = concat(sum, mean, max); augmented views via node drop + feature mask.
-   - **Topology channel (Z):** 0-dim extended persistence (degree + closeness filtrations) → Extended Persistence Landscapes (EPL) → 5-layer MLP (ETL). EPL is computed once per graph; contrastive views use dropout + Gaussian noise on standardized EPL.
-   - **Loss:** `L = α·InfoNCE(H, H') + β·InfoNCE(Z, Z')`
-3. **Score** — kNN distance from each graph embedding to benign train embeddings (joint H+Z).
-4. **Detect** — Pick the threshold on a **balanced 1:1 validation set** (benign : malicious) that maximizes F1; apply it to a **balanced 1:1 test set**.
+TRACE learns representations of benign activity graphs using graph contrastive learning and topological summaries. It scores new graphs by their distance from benign training embeddings in the projected representation space.
 
-Training uses benign graphs only. Malicious graphs appear in validation (threshold tuning) and test (evaluation).
+Representation learning uses benign graphs only. **Labeled benign and malicious validation graphs are used to select the detection threshold.** This is not a completely label-free detection pipeline.
 
-## Datasets
+## Quick start
 
-| Dataset | Description | Labels |
-|---------|-------------|--------|
-| **StreamSpot** | 600 provenance graphs | gid 300–399 = attack |
-| **GraSec-IoT** | IoT flow-graph snapshots | `connection.Label` index 6 = benign |
-
-## Run
-
-**Dependencies:** Python 3.10+, NumPy, SciPy, scikit-learn, NetworkX, PyTorch.
+Use Python 3.10 or newer. Run these commands from the repository root:
 
 ```bash
-python3 topids_topogcl_prototype.py --dataset all --epochs 12
+git clone https://github.com/syd-kiwi/IDS_TopoGCL.git
+cd IDS_TopoGCL
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-Per-dataset settings (`DATASET_CONFIG` in the script):
+Download the datasets separately and place them at the paths in the [run guide](docs/RUNNING.md). Then run TRACE on one dataset:
 
-| Dataset | α | β | kNN k |
-|---------|---|---|-------|
-| streamspot | 1.0 | 0.0 | 5 |
-| grasec | 0.5 | 0.5 | 5 |
+```bash
+python scripts/topids_topogcl_improved.py \
+  --dataset streamspot --epochs 12 --seeds 42,43,44 \
+  --mode graph_topo --out-dir outputs/trace_streamspot
+```
 
-Other useful flags: `--dataset streamspot|grasec`, `--seed 42`, `--epochs 12`.
+New runs should write to `outputs/` to keep the saved experimental results intact. TRACE currently runs on CPU; the baseline runners can use CUDA when available.
 
-## Key Results
+## Repository guide
 
-Balanced test sets (1:1 benign : malicious), F1-optimal threshold from validation, 12 epochs, seed 42.
+| Location | Contents |
+| --- | --- |
+| `scripts/topids_topogcl_improved.py` | TRACE training and evaluation |
+| `scripts/topids_topogcl_prototype.py` | Earlier prototype, retained for historical comparisons |
+| `scripts/train_ids_gnn.py` | Supervised GNN baseline |
+| `scripts/train_ids_cl_baselines.py` | Benign-only GraphCL baseline |
+| `scripts/ids_graph_data.py` | Shared data loading and evaluation helpers |
+| `paper/` | LaTeX manuscript and figures |
+| `results/` | Saved experiment outputs and plots |
+| `utils/` | Compatibility classes for legacy dataset pickles |
 
-| Dataset | Test size | ROC-AUC | F1 | Recall | FPR |
-|---------|-----------|---------|-----|--------|-----|
-| StreamSpot | 80 + 80 | 0.9527 | 0.9455 | 0.9750 | 0.0875 |
-| GraSec-IoT | 22 + 22 | 0.8822 | 0.8571 | 0.8182 | 0.0909 |
+Older filenames retain `topids` and `topogcl` for compatibility. The proposed method is **TRACE**.
 
-**StreamSpot** — threshold = 0.113 (val F1 = 0.927); confusion matrix: TN=73, FP=7, FN=2, TP=78.
+## Recorded TRACE results
 
-**GraSec-IoT** — threshold = 0.502 (val F1 = 0.727); confusion matrix: TN=20, FP=2, FN=4, TP=18.
+Mean ± standard deviation of test F1, read from the saved joint graph and topology runs:
+
+| Dataset | Seeds | F1 |
+| --- | --- | --- |
+| StreamSpot | 42, 43, 44 | 0.923 ± 0.019 |
+| GraSec-IoT | 42, 43, 44 | 0.790 ± 0.065 |
+| Unicorn Wget | 42–46 | 0.583 ± 0.053 |
+
+See the [result file guide](results/README.md) for exact sources and the [manuscript](paper/4_Evaluation.tex) for baseline comparisons and limitations. These are archived measurements, not results from a new run. TRACE does not outperform the baselines uniformly across datasets.

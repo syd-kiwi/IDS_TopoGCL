@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TopIDS — Improved TopoGCL-style IDS anomaly detection for StreamSpot, GraSec, and Wget.
+TRACE — Topology-aware graph contrastive learning for resilient intrusion detection.
 
 This script is intentionally based on topids_topogcl_prototype.py, not the old
 .npz IDS baseline runner. It keeps the real TopoGCL-style pieces:
@@ -15,14 +15,14 @@ This script is intentionally based on topids_topogcl_prototype.py, not the old
 Datasets expected under data/:
   - StreamSpot: data/streamspot/all.tsv
   - GraSec:     data/grasec-iot/graph_json/Graph_JSON/{train,eval,test}/data_*.json
-    - Wget:       data/wget/graphs.pkl
+  - Wget:       data/wget/graphs.pkl
 
 Examples:
-  python3 topids_topogcl_improved.py --dataset streamspot --epochs 12 --mode graph_topo
-  python3 topids_topogcl_improved.py --dataset grasec --epochs 12 --mode graph_topo
-  python3 topids_topogcl_improved.py --dataset all --epochs 12 --seeds 42,43,44,45,46 --mode graph_topo
-  python3 topids_topogcl_improved.py --dataset all --mode graph_only
-  python3 topids_topogcl_improved.py --dataset all --mode topo_only
+  python3 scripts/topids_topogcl_improved.py --dataset streamspot --epochs 12 --mode graph_topo
+  python3 scripts/topids_topogcl_improved.py --dataset grasec --epochs 12 --mode graph_topo
+  python3 scripts/topids_topogcl_improved.py --dataset all --epochs 12 --seeds 42,43,44,45,46 --mode graph_topo
+  python3 scripts/topids_topogcl_improved.py --dataset all --mode graph_only
+  python3 scripts/topids_topogcl_improved.py --dataset all --mode topo_only
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ def parse_csv_strings(raw: str) -> list[str]:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Improved TopoGCL IDS anomaly detection for StreamSpot, GraSec, and Wget.",
+        description="TRACE intrusion detection for StreamSpot, GraSec, and Wget.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--dataset", choices=["streamspot", "grasec", "wget", "all"], default="all")
@@ -1045,7 +1045,7 @@ def write_outputs(all_results: dict[str, list[dict]], summaries: list[dict], arg
 
 def main():
     args = finalize_args(parse_args())
-    print("TopIDS improved TopoGCL started.")
+    print("TRACE started.")
     print(f"Config: dataset={args.dataset} mode={args.mode} seeds={args.seeds_list}")
     print(f"Config: alpha={args.alpha_eff} beta={args.beta_eff} filtrations={args.filtration_list}")
     names = list(LOADERS) if args.dataset == "all" else [args.dataset]
